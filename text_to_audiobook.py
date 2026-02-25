@@ -10,6 +10,7 @@ VOICE_NAME = "Enceladus"
 MODEL_NAME = "gemini-2.5-pro-tts"
 LANGUAGE_CODE = "es-419"  # Español Latinoamérica, como en el playground
 DEFAULT_WORKERS = 1
+DEFAULT_PROMPT = "Lee el siguiente texto en español de forma natural."
 
 
 load_dotenv()
@@ -115,7 +116,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--prompt",
-        default="Lee el siguiente texto en español de forma natural.",
+        default=DEFAULT_PROMPT,
         help="Prompt/estilo para la síntesis de voz.",
     )
     parser.add_argument(
