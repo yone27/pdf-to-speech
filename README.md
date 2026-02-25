@@ -79,3 +79,4 @@ py text_to_audiobook.py BOOK [--workers N] [--prompt "texto"] [--base-dir RUTA]
 - `--prompt`: texto de instrucciones de estilo para la voz.
 - `--base-dir`: base donde buscar la carpeta del libro si pasas solo el nombre.
 
+DOC: https://docs.cloud.google.com/text-to-speech/docs/gemini-tts?hl=es-419#curl
