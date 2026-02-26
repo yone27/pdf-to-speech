@@ -3,7 +3,7 @@ import re
 import argparse
 import pdfplumber
 
-MAX_CHARS_DEFAULT = 3000
+MAX_CHARS_DEFAULT = 1500
 
 
 def extract_text_from_pdf(path: str) -> str:

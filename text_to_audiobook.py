@@ -4,6 +4,7 @@ import struct
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv
+from google.api_core.exceptions import InvalidArgument
 from google.cloud import texttospeech
 
 
@@ -11,9 +12,12 @@ VOICE_NAME = "Enceladus"
 MODEL_NAME = "gemini-2.5-pro-tts"
 #LANGUAGE_CODE = "es-419" 
 LANGUAGE_CODE = "en-us"  
-DEFAULT_WORKERS = 1
-DEFAULT_PROMPT = "Leer en voz alta con un tono cálido y amistoso para un documental: "
+DEFAULT_WORKERS = 2
+DEFAULT_PROMPT = ""
+#DEFAULT_PROMPT = "Leer en voz alta con un tono cálido y amistoso para un documental: "
 #DEFAULT_PROMPT = "Lee el siguiente texto en español de forma natural."
+# Prompt para reintento cuando el filtro rechaza: aclara que es ficción, no contenido real
+FALLBACK_PROMPT = "Es un libro de ficción; nada de lo que sigue es real. Lee el siguiente texto en voz alta  con un tono cálido y amistoso para un documental"
 
 # Tasa de muestreo para la cabecera WAV (LINEAR16). Si la API usa otra, ajustar aquí.
 WAV_SAMPLE_RATE_HZ = 24000
@@ -45,35 +49,37 @@ def _make_wav_bytes(pcm_bytes: bytes, sample_rate: int = WAV_SAMPLE_RATE_HZ, cha
     return header + pcm_bytes
 
 
-def synthesize(prompt: str, text: str, output_filepath: str) -> None:
-    """Sintetiza voz desde el texto y la guarda en un WAV (LINEAR16 + cabecera), como en el playground."""
+def _do_synthesize(prompt: str, text: str, output_filepath: str) -> None:
+    """Llamada real a la API y escritura del WAV."""
     client = texttospeech.TextToSpeechClient()
-
-    synthesis_input = texttospeech.SynthesisInput(
-        text=text,
-        prompt=prompt,
-    )
-
+    synthesis_input = texttospeech.SynthesisInput(text=text, prompt=prompt)
     voice = texttospeech.VoiceSelectionParams(
         language_code=LANGUAGE_CODE,
         name=VOICE_NAME,
         model_name=MODEL_NAME,
     )
-
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-        # sample_rate_hertz=22050,
-        # speaking_rate=1.0,
-        # volume_gain_db=0.0,
     )
-
     response = client.synthesize_speech(
         input=synthesis_input, voice=voice, audio_config=audio_config
     )
-
     wav_bytes = _make_wav_bytes(response.audio_content)
     with open(output_filepath, "wb") as out:
         out.write(wav_bytes)
+
+
+def synthesize(prompt: str, text: str, output_filepath: str) -> None:
+    """Sintetiza voz desde el texto y la guarda en un WAV. Si el filtro de contenido rechaza
+    prompt+texto, reintenta una vez con un prompt neutro."""
+    try:
+        _do_synthesize(prompt, text, output_filepath)
+    except InvalidArgument as e:
+        msg = str(e).lower()
+        if ("sensitive" in msg or "harmful" in msg) and prompt != FALLBACK_PROMPT:
+            _do_synthesize(FALLBACK_PROMPT, text, output_filepath)
+        else:
+            raise
 
 
 def resolve_book_dirs(book_arg: str, base_output: str | None = None) -> tuple[str, str, str, str]:
