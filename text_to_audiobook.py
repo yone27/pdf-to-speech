@@ -1,5 +1,6 @@
 import os
 import argparse
+import struct
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv
@@ -8,22 +9,50 @@ from google.cloud import texttospeech
 
 VOICE_NAME = "Enceladus"
 MODEL_NAME = "gemini-2.5-pro-tts"
-LANGUAGE_CODE = "es-419"  # Español Latinoamérica, como en el playground
+#LANGUAGE_CODE = "es-419" 
+LANGUAGE_CODE = "en-us"  
 DEFAULT_WORKERS = 1
-DEFAULT_PROMPT = "Lee el siguiente texto en español de forma natural."
+DEFAULT_PROMPT = "Leer en voz alta con un tono cálido y amistoso para un documental: "
+#DEFAULT_PROMPT = "Lee el siguiente texto en español de forma natural."
 
+# Tasa de muestreo para la cabecera WAV (LINEAR16). Si la API usa otra, ajustar aquí.
+WAV_SAMPLE_RATE_HZ = 24000
 
 load_dotenv()
 
+def _make_wav_bytes(pcm_bytes: bytes, sample_rate: int = WAV_SAMPLE_RATE_HZ, channels: int = 1) -> bytes:
+    """Añade cabecera WAV a PCM 16-bit mono y devuelve el archivo .wav completo."""
+    n = len(pcm_bytes)
+    byte_rate = sample_rate * channels * 2
+    block_align = channels * 2
+    # Cabecera RIFF/WAVE (44 bytes)
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + n,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        16,
+        b"data",
+        n,
+    )
+    return header + pcm_bytes
+
 
 def synthesize(prompt: str, text: str, output_filepath: str) -> None:
-    """Sintetiza voz desde el texto y la guarda en un MP3."""
+    """Sintetiza voz desde el texto y la guarda en un WAV (LINEAR16 + cabecera), como en el playground."""
     client = texttospeech.TextToSpeechClient()
 
     synthesis_input = texttospeech.SynthesisInput(
-        text=text, 
+        text=text,
         prompt=prompt,
-        )
+    )
 
     voice = texttospeech.VoiceSelectionParams(
         language_code=LANGUAGE_CODE,
@@ -33,18 +62,18 @@ def synthesize(prompt: str, text: str, output_filepath: str) -> None:
 
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-        sample_rate_hertz=22050,
-        speaking_rate=1.0,
-        volume_gain_db=0.0,
-        
+        # sample_rate_hertz=22050,
+        # speaking_rate=1.0,
+        # volume_gain_db=0.0,
     )
 
     response = client.synthesize_speech(
         input=synthesis_input, voice=voice, audio_config=audio_config
     )
 
+    wav_bytes = _make_wav_bytes(response.audio_content)
     with open(output_filepath, "wb") as out:
-        out.write(response.audio_content)
+        out.write(wav_bytes)
 
 
 def resolve_book_dirs(book_arg: str, base_output: str | None = None) -> tuple[str, str, str, str]:
@@ -68,7 +97,7 @@ def resolve_book_dirs(book_arg: str, base_output: str | None = None) -> tuple[st
 
 
 def collect_parts(text_dir: str, audio_dir: str) -> list[tuple[str, str]]:
-    """Devuelve una lista de (ruta_txt, ruta_mp3) ordenada."""
+    """Devuelve una lista de (ruta_txt, ruta_wav) ordenada."""
     if not os.path.isdir(text_dir):
         raise FileNotFoundError(f"No existe la carpeta de texto: {text_dir}")
 
@@ -160,7 +189,14 @@ def main() -> None:
                 output_path = future.result()
                 print(f"✅ Audio generado: {output_path}")
             except Exception as exc:  # noqa: BLE001
+                # Mostrar mensaje legible
                 print(f"⚠️ Error procesando {input_path}: {exc}")
+                # Mostrar representación detallada de la excepción (tipo, args, etc.)
+                print(f"    Detalle excepción: {repr(exc)}")
+                # Si la excepción tiene respuesta HTTP (p.ej. google.api_core.exceptions)
+                status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                if status_code is not None:
+                    print(f"    HTTP status code: {status_code}")
 
     print("✔️ Proceso de generación de audio finalizado.")
 
