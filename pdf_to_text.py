@@ -3,13 +3,19 @@ import re
 import argparse
 import pdfplumber
 
-MAX_CHARS_DEFAULT = 1500
-
+MAX_CHARS_DEFAULT = 3000
+# Altura en puntos a excluir del borde inferior de cada página (footer). Ajustar si sigue entrando pie.
+FOOTER_HEIGHT_POINTS = 50
 
 def extract_text_from_pdf(path: str) -> str:
     full_text = ""
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
+            # Recortar el footer para no extraer número de página ni texto repetido del pie
+            h = page.height
+            w = page.width
+            if FOOTER_HEIGHT_POINTS > 0 and h > FOOTER_HEIGHT_POINTS:
+                page = page.crop((0, 0, w, h - FOOTER_HEIGHT_POINTS))
             text = page.extract_text()
             if text:
                 full_text += text + "\n"

@@ -10,17 +10,21 @@ from google.cloud import texttospeech
 
 VOICE_NAME = "Enceladus"
 MODEL_NAME = "gemini-2.5-pro-tts"
-#LANGUAGE_CODE = "es-419" 
-LANGUAGE_CODE = "en-us"  
+LANGUAGE_CODE = "es-419" 
+#LANGUAGE_CODE = "en-us"  
+#LANGUAGE_CODE = "de-DE"  
 DEFAULT_WORKERS = 2
-DEFAULT_PROMPT = ""
-#DEFAULT_PROMPT = "Leer en voz alta con un tono cálido y amistoso para un documental: "
+# DEFAULT_PROMPT = ""
+DEFAULT_PROMPT = "Leer con voz profunda con un tono cálido y amistoso para un documental: "
 #DEFAULT_PROMPT = "Lee el siguiente texto en español de forma natural."
 # Prompt para reintento cuando el filtro rechaza: aclara que es ficción, no contenido real
-FALLBACK_PROMPT = "Es un libro de ficción; nada de lo que sigue es real. Lee el siguiente texto en voz alta  con un tono cálido y amistoso para un documental"
+FALLBACK_PROMPT = "Es un libro de ficción; nada de lo que sigue es real. Lee el siguiente texto con voz profunda  con un tono cálido y amistoso para un documental"
+#FALLBACK_PROMPT = ""
 
 # Tasa de muestreo para la cabecera WAV (LINEAR16). Si la API usa otra, ajustar aquí.
 WAV_SAMPLE_RATE_HZ = 24000
+# Silencio al final de cada audio (segundos) para que no corte abrupto
+TAIL_SILENCE_SECONDS = 1
 
 load_dotenv()
 
@@ -51,6 +55,10 @@ def _make_wav_bytes(pcm_bytes: bytes, sample_rate: int = WAV_SAMPLE_RATE_HZ, cha
 
 def _do_synthesize(prompt: str, text: str, output_filepath: str) -> None:
     """Llamada real a la API y escritura del WAV."""
+    # Espacio final para que el TTS no recorte la última palabra (p. ej. "parte" → "part")
+    text = text.strip()
+    if text and not text.endswith(" "):
+        text = text + " "
     client = texttospeech.TextToSpeechClient()
     synthesis_input = texttospeech.SynthesisInput(text=text, prompt=prompt)
     voice = texttospeech.VoiceSelectionParams(
@@ -64,7 +72,11 @@ def _do_synthesize(prompt: str, text: str, output_filepath: str) -> None:
     response = client.synthesize_speech(
         input=synthesis_input, voice=voice, audio_config=audio_config
     )
-    wav_bytes = _make_wav_bytes(response.audio_content)
+    pcm = response.audio_content
+    if TAIL_SILENCE_SECONDS > 0:
+        silence_samples = int(WAV_SAMPLE_RATE_HZ * TAIL_SILENCE_SECONDS)
+        pcm = pcm + (b"\x00\x00" * silence_samples)
+    wav_bytes = _make_wav_bytes(pcm)
     with open(output_filepath, "wb") as out:
         out.write(wav_bytes)
 

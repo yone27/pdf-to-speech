@@ -2,8 +2,8 @@ import os
 import re
 
 # Configuración: edita aquí y ejecuta el script sin argumentos.
-SOURCE_TXT = "sumerios.txt"
-MAX_CHARS = 750
+SOURCE_TXT = "sumeriosEN.txt"
+MAX_CHARS = 3500
 OUTPUT_DIR = None  # None = se usa la carpeta donde está el TXT; si quieres otra, pon la ruta aquí
 
 
@@ -68,6 +68,63 @@ def chunk_text(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _section_slug(title: str) -> str:
+    """
+    Convierte el título de una sección (# Nombre) en un slug para el archivo:
+    minúsculas, sin tildes, espacios y caracteres raros reemplazados por nada o guión.
+    """
+    s = title.strip().lower()
+    # Normalizar tildes
+    for old, new in [("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ñ", "n")]:
+        s = s.replace(old, new)
+    # Solo alfanuméricos y espacios; espacios → nada (o un guión si prefieres)
+    s = re.sub(r"[^a-z0-9\s]+", "", s)
+    s = re.sub(r"\s+", "", s)  # quitar espacios
+    return s or "section"
+
+
+def split_by_chapters(raw_text: str) -> list[tuple[str, str]]:
+    """
+    Divide el texto por líneas que empiezan con "# nombre de la sección".
+    Devuelve una lista de (section_slug, section_body). Cada sección se troceará
+    después para respetar MAX_CHARS.
+    """
+    lines = raw_text.splitlines()
+    sections: list[tuple[str, str]] = []
+
+    # Regex: línea que empieza con # y luego el nombre de la sección
+    header_re = re.compile(r"^#\s+(.+)$")
+
+    current_lines: list[str] = []
+    current_slug: str | None = None
+
+    for line in lines:
+        m = header_re.match(line.strip())
+        if m:
+            # Guardar bloque anterior (con su slug; si no había header previo = intro)
+            if current_lines:
+                body = "\n".join(current_lines).strip()
+                if body:
+                    slug = current_slug if current_slug else "intro"
+                    sections.append((slug, body))
+            # Nuevo bloque: el título es el nombre de esta sección
+            current_slug = _section_slug(m.group(1))
+            current_lines = []
+            continue
+        current_lines.append(line)
+
+    if current_lines:
+        body = "\n".join(current_lines).strip()
+        if body:
+            slug = current_slug if current_slug else "section"
+            sections.append((slug, body))
+
+    if not sections:
+        return [("cap1", raw_text.strip())]
+
+    return sections
+
+
 def get_book_dirs(txt_path: str, base_output: str | None = None) -> tuple[str, str, str]:
     txt_path = os.path.abspath(txt_path)
     book_name = os.path.splitext(os.path.basename(txt_path))[0]
@@ -95,20 +152,44 @@ def main() -> None:
 
     print("Leyendo TXT...")
     with open(txt_path, "r", encoding="utf-8") as f:
-        text = f.read()
+        raw_text = f.read()
 
-    print("Limpiando texto...")
-    text = clean_text(text)
+    print("Detectando capítulos...")
+    chapters = split_by_chapters(raw_text)
+    print(f"Capítulos detectados: {len(chapters)}")
 
-    print("Dividiendo en partes...")
-    chunks = chunk_text(text, MAX_CHARS)
-    print(f"Total de partes: {len(chunks)}")
+    global_part_index = 1
 
-    for i, chunk in enumerate(chunks, start=1):
-        file_name = f"part{str(i).zfill(3)}.txt"
-        file_path = os.path.join(text_dir, file_name)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(chunk)
+    for chapter_slug, chapter_body in chapters:
+        if not chapter_body.strip():
+            continue
+
+        print(f"  Procesando capítulo '{chapter_slug}'...")
+
+        # Limpiar texto de este capítulo y dividir en chunks
+        cleaned = clean_text(chapter_body)
+
+        print("  Dividiendo en partes...")
+        chapter_chunks = chunk_text(cleaned, MAX_CHARS)
+        print(f"    Partes en este capítulo: {len(chapter_chunks)}")
+
+        for part_idx, chunk in enumerate(chapter_chunks, start=1):
+            global_name = f"part{str(global_part_index).zfill(3)}"
+
+            if len(chapter_chunks) == 1:
+                suffix = f"-{chapter_slug}"
+            elif chapter_slug == "prologo":
+                suffix = f"-{chapter_slug}part{part_idx}"
+            else:
+                suffix = f"-{chapter_slug}-part{part_idx}"
+
+            file_name = f"{global_name}{suffix}.txt"
+            file_path = os.path.join(text_dir, file_name)
+
+            with open(file_path, "w", encoding="utf-8") as f_out:
+                f_out.write(chunk)
+
+            global_part_index += 1
 
     print(f"✅ Partes guardadas en: {text_dir}")
     print(f"   Para generar audio: python text_to_audiobook.py \"{book_dir}\"")
