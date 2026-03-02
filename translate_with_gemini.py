@@ -9,16 +9,14 @@ import requests
 
 
 # Configuración por defecto: puedes ejecutar el script sin argumentos
-# y ajustar estos valores aquí si quieres.
-SOURCE_BOOK_DIR = "atalntisES"  # Carpeta del libro de origen (la que contiene "text/")
-TARGET_LANG_CODE = "en"
-#MODEL_NAME = "gemini-3-flash-preview"
+SOURCE_BOOK_DIR = "anunakisEN"
+TARGET_LANG_CODE = "de"
 MODEL_NAME = "gemini-2.5-pro"
 
 # Comportamiento adicional
 SKIP_EXISTING = True  # Si True, no vuelve a traducir archivos ya generados en la carpeta destino
-REQUEST_TIMEOUT = 60.0  # segundos
-MAX_RETRIES = 3  # reintentos por archivo ante errores temporales
+REQUEST_TIMEOUT = 60.0  
+MAX_RETRIES = 3 
 
 
 class GeminiTranslationError(Exception):
