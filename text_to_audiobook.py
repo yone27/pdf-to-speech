@@ -10,16 +10,18 @@ from google.cloud import texttospeech
 
 VOICE_NAME = "Enceladus"
 MODEL_NAME = "gemini-2.5-pro-tts"
-LANGUAGE_CODE = "es-419" 
-#LANGUAGE_CODE = "en-us"  
+#LANGUAGE_CODE = "es-419" 
+LANGUAGE_CODE = "en-US"  
 #LANGUAGE_CODE = "de-DE"  
-DEFAULT_WORKERS = 2
+DEFAULT_WORKERS = 3
 # DEFAULT_PROMPT = ""
-DEFAULT_PROMPT = "Leer con voz profunda con un tono cálido y amistoso para un documental: "
+#DEFAULT_PROMPT = "Leer con voz profunda con un tono cálido y amistoso para un documental: "
 #DEFAULT_PROMPT = "Lee el siguiente texto en español de forma natural."
 # Prompt para reintento cuando el filtro rechaza: aclara que es ficción, no contenido real
-FALLBACK_PROMPT = "Es un libro de ficción; nada de lo que sigue es real. Lee el siguiente texto con voz profunda  con un tono cálido y amistoso para un documental"
+#FALLBACK_PROMPT = "Es un libro de ficción; nada de lo que sigue es real. Lee el siguiente texto con voz profunda  con un tono cálido y amistoso para un documental"
 #FALLBACK_PROMPT = ""
+DEFAULT_PROMPT = "Read with a deep voice and warm, friendly tone for a documentary: "
+FALLBACK_PROMPT = "It's a fictional book; nothing that follows is real. Read the following text with a deep voice and warm, friendly tone for a documentary"
 
 # Tasa de muestreo para la cabecera WAV (LINEAR16). Si la API usa otra, ajustar aquí.
 WAV_SAMPLE_RATE_HZ = 24000
