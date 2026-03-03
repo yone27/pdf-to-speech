@@ -136,11 +136,16 @@ def collect_parts(text_dir: str, audio_dir: str) -> list[tuple[str, str]]:
 
 
 def process_part(prompt: str, input_path: str, output_path: str) -> str:
+    # Si el audio ya existe, no volvemos a llamar a la API.
+    if os.path.exists(output_path):
+        print(f"Audio ya existe, se omite: {output_path}")
+        return output_path, False
+
     with open(input_path, "r", encoding="utf-8") as f:
         text = f.read()
 
     synthesize(prompt, text, output_path)
-    return output_path
+    return output_path, True
 
 
 def main() -> None:
@@ -197,6 +202,11 @@ def main() -> None:
 
     print(f"Generando audio para {total} partes con {args.workers} workers...")
 
+    total_requests = 0
+    total_generated = 0
+    total_skipped = 0
+    total_failed = 0
+
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {
             executor.submit(process_part, args.prompt, in_path, out_path): in_path
@@ -206,9 +216,16 @@ def main() -> None:
         for future in as_completed(futures):
             input_path = futures[future]
             try:
-                output_path = future.result()
-                print(f"✅ Audio generado: {output_path}")
+                output_path, did_request = future.result()
+                if did_request:
+                    total_requests += 1
+                    total_generated += 1
+                    print(f"Audio generado: {output_path}")
+                else:
+                    total_skipped += 1
+                    # Ya se informó en process_part que se omitió
             except Exception as exc:  # noqa: BLE001
+                total_failed += 1
                 # Mostrar mensaje legible
                 print(f"⚠️ Error procesando {input_path}: {exc}")
                 # Mostrar representación detallada de la excepción (tipo, args, etc.)
@@ -219,6 +236,14 @@ def main() -> None:
                     print(f"    HTTP status code: {status_code}")
 
     print("✔️ Proceso de generación de audio finalizado.")
+    print()
+    print("Resumen de la ejecución:")
+    print(f"  Partes totales: {total}")
+    print(f"  Peticiones reales a la API: {total_requests}")
+    print(f"  Audios generados en esta ejecución: {total_generated}")
+    print(f"  Audios ya existentes (omitidos): {total_skipped}")
+    print(f"  Intentos fallidos: {total_failed}")
+    print(f"  Audios sin generar tras esta ejecución: {total_failed}")
 
 
 if __name__ == "__main__":

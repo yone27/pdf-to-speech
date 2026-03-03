@@ -4,19 +4,26 @@ import os
 import sys
 import time
 from typing import Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from dotenv import load_dotenv
+
+
+# Cargar variables de entorno desde .env (incluye GEMINI_API_KEY)
+load_dotenv()
 
 
 # Configuración por defecto: puedes ejecutar el script sin argumentos
-SOURCE_BOOK_DIR = "anunakisEN"
+SOURCE_BOOK_DIR = "odiseaES"
 TARGET_LANG_CODE = "de"
 MODEL_NAME = "gemini-2.5-pro"
 
 # Comportamiento adicional
 SKIP_EXISTING = True  # Si True, no vuelve a traducir archivos ya generados en la carpeta destino
-REQUEST_TIMEOUT = 60.0  
-MAX_RETRIES = 3 
+REQUEST_TIMEOUT = 60.0
+MAX_RETRIES = 3
+DEFAULT_WORKERS = 2
 
 
 class GeminiTranslationError(Exception):
@@ -149,6 +156,61 @@ def translate_text_with_gemini(
     raise GeminiTranslationError(f"Falló la traducción tras {max_retries} intentos: {last_error}")
 
 
+def process_file(
+    index: int,
+    total: int,
+    filename: str,
+    src_path: str,
+    dst_path: str,
+    *,
+    target_lang: str,
+    model_name: str,
+    api_key: str,
+    skip_existing: bool,
+) -> dict:
+    """
+    Traduce un solo archivo de texto y devuelve un dict con el estado
+    de la operación: ok / skipped / error, e información adicional.
+    """
+    result: dict = {
+        "status": "ok",
+        "filename": filename,
+        "src_path": src_path,
+        "dst_path": dst_path,
+        "made_request": False,
+        "error": None,
+    }
+
+    try:
+        if skip_existing and os.path.isfile(dst_path):
+            result["status"] = "skipped"
+            return result
+
+        with open(src_path, "r", encoding="utf-8") as f:
+            original_text = f.read()
+
+        if not original_text.strip():
+            translated_text = ""
+        else:
+            translated_text = translate_text_with_gemini(
+                original_text,
+                target_lang,
+                model_name=model_name,
+                api_key=api_key,
+            )
+            result["made_request"] = True
+
+        with open(dst_path, "w", encoding="utf-8") as f_out:
+            f_out.write(translated_text)
+
+        result["status"] = "ok"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result["status"] = "error"
+        result["error"] = str(exc)
+        return result
+
+
 def process_files(
     src_text_dir: str,
     dst_text_dir: str,
@@ -157,6 +219,7 @@ def process_files(
     model_name: str,
     api_key: str,
     skip_existing: bool,
+    workers: int,
 ) -> None:
     """
     Recorre todos los .txt en src_text_dir, traduce su contenido y guarda
@@ -174,52 +237,68 @@ def process_files(
     translated = 0
     skipped = 0
     errors = 0
+    total_requests = 0
 
     print(f"Archivos a procesar: {total}")
 
-    for index, filename in enumerate(txt_files, start=1):
-        src_path = os.path.join(src_text_dir, filename)
-        dst_path = os.path.join(dst_text_dir, filename)
-
-        if skip_existing and os.path.isfile(dst_path):
-            skipped += 1
-            print(f"[{index}/{total}] Saltando '{filename}' (ya existe en destino).")
-            continue
-
-        print(f"[{index}/{total}] Traduciendo '{filename}'...")
-
-        try:
-            with open(src_path, "r", encoding="utf-8") as f:
-                original_text = f.read()
-
-            if not original_text.strip():
-                print(f"  [INFO] Archivo vacío, copiando tal cual.")
-                translated_text = ""
-            else:
-                translated_text = translate_text_with_gemini(
-                    original_text,
-                    target_lang,
+    # Crear tareas para cada archivo
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for index, filename in enumerate(txt_files, start=1):
+            src_path = os.path.join(src_text_dir, filename)
+            dst_path = os.path.join(dst_text_dir, filename)
+            futures[
+                executor.submit(
+                    process_file,
+                    index,
+                    total,
+                    filename,
+                    src_path,
+                    dst_path,
+                    target_lang=target_lang,
                     model_name=model_name,
                     api_key=api_key,
+                    skip_existing=skip_existing,
+                )
+            ] = (index, filename)
+
+        for future in as_completed(futures):
+            index, filename = futures[future]
+            try:
+                result = future.result()
+                status = result.get("status")
+                made_request = bool(result.get("made_request"))
+
+                if status == "ok":
+                    translated += 1
+                    if made_request:
+                        total_requests += 1
+                    print(f"[{index}/{total}] OK '{filename}'")
+                elif status == "skipped":
+                    skipped += 1
+                    print(f"[{index}/{total}] Saltando '{filename}' (ya existe en destino).")
+                else:
+                    errors += 1
+                    if made_request:
+                        total_requests += 1
+                    error_msg = result.get("error") or "Error desconocido"
+                    print(
+                        f"[{index}/{total}] ERROR '{filename}': {error_msg}",
+                        file=sys.stderr,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                errors += 1
+                print(
+                    f"[{index}/{total}] ERROR inesperado en '{filename}': {exc}",
+                    file=sys.stderr,
                 )
 
-            with open(dst_path, "w", encoding="utf-8") as f_out:
-                f_out.write(translated_text)
-
-            translated += 1
-            print(f"  [OK] Guardado en '{dst_path}'.")
-        except Exception as exc:
-            errors += 1
-            print(
-                f"  [ERROR] No se pudo traducir '{filename}': {exc}",
-                file=sys.stderr,
-            )
-
     print("\nResumen de traducción:")
-    print(f"  Total archivos:    {total}")
-    print(f"  Traducidos ok:     {translated}")
-    print(f"  Saltados (existen):{skipped}")
-    print(f"  Con errores:       {errors}")
+    print(f"  Total archivos:         {total}")
+    print(f"  Traducidos ok:          {translated}")
+    print(f"  Saltados (existen):     {skipped}")
+    print(f"  Con errores:            {errors}")
+    print(f"  Peticiones reales a API:{total_requests}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -259,6 +338,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Si se indica, sobrescribe archivos ya existentes en la carpeta destino.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help=f"Número máximo de peticiones concurrentes a Gemini (por defecto {DEFAULT_WORKERS}).",
+    )
     return parser.parse_args()
 
 
@@ -289,6 +374,7 @@ def main() -> None:
     print(f"Idioma destino: {args.lang}")
     print(f"Modelo Gemini:  {args.model}")
     print(f"Sobrescribir existentes: {'sí' if not skip_existing else 'no'}")
+    print(f"Workers (hilos): {args.workers}")
     print()
 
     process_files(
@@ -298,6 +384,7 @@ def main() -> None:
         model_name=args.model,
         api_key=api_key,
         skip_existing=skip_existing,
+        workers=args.workers,
     )
 
 

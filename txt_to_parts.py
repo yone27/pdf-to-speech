@@ -2,7 +2,7 @@ import os
 import re
 
 # Configuración: edita aquí y ejecuta el script sin argumentos.
-SOURCE_TXT = "atalntisES.txt"
+SOURCE_TXT = "odiseaES.txt"
 MAX_CHARS = 3500
 OUTPUT_DIR = None  # None = se usa la carpeta donde está el TXT; si quieres otra, pon la ruta aquí
 
