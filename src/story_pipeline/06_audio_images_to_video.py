@@ -16,13 +16,20 @@ HEIGHT = 1080
 FPS = 24
 
 # Pausa de silencio entre audios al concatenar (en segundos). 0.0 = sin pausa.
-AUDIO_GAP_SECONDS = 1.0
+AUDIO_GAP_SECONDS = 0.1
 
 # Segundos a recortar del inicio de cada audio de narración (para eliminar ruidos de arranque).
-AUDIO_TRIM_START_SECONDS = 0.3
+AUDIO_TRIM_START_SECONDS = 0.1
 
 # Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).
-MUSIC_VOLUME = 0.04
+#MUSIC_VOLUME = 0.04
+MUSIC_VOLUME = 0.0
+
+# Denoise opcional sobre el audio final (narración +/- música).
+# Parámetros suaves para estática leve: nr=reducción (dB), nf=umbral, tn=1 adapta al contenido.
+# Ajustar nr: 6=más brillo, 10=más limpieza.
+ENABLE_AUDIO_DENOISE = True
+AUDIO_DENOISE_FILTER = "afftdn=nr=8:nf=-50:tn=1"
 
 # Efecto visual aplicado a cada imagen antes de las transiciones.
 # Valores soportados: "none", "pulse".
@@ -353,11 +360,12 @@ def _export_simple_slideshow_with_ffmpeg(
     audio_map_label: str
     if music_index is not None:
         # Mezclar narración + música con volumen configurable y aplicar un pequeño fade-in
-        # para evitar clics/artefactos al inicio.
+        # y, opcionalmente, un filtro de denoise.
         voice_label = f"[{voice_index}:a]"
         music_label = f"[{music_index}:a]"
         music_vol_label = "[music_vol]"
         audio_mix_label = "[a_mix]"
+        fade_label = "[a_fade]"
         audio_out_label = "[aout]"
         filter_parts.append(
             f"{music_label}volume={music_volume:.3f}{music_vol_label}"
@@ -367,16 +375,35 @@ def _export_simple_slideshow_with_ffmpeg(
         )
         # Fade-in muy corto (0.1 s) para suavizar el arranque del audio.
         filter_parts.append(
-            f"{audio_mix_label}afade=t=in:st=0:d=0.1{audio_out_label}"
+            f"{audio_mix_label}afade=t=in:st=0:d=0.1{fade_label}"
         )
+        if ENABLE_AUDIO_DENOISE:
+            filter_parts.append(
+                f"{fade_label}{AUDIO_DENOISE_FILTER}{audio_out_label}"
+            )
+        else:
+            # Sin denoise, usar directamente la señal con fade (anull = filtro identidad).
+            filter_parts.append(
+                f"{fade_label}anull{audio_out_label}"
+            )
         audio_map_label = audio_out_label
     else:
-        # Solo narración, sin música de fondo: aplicar también un pequeño fade-in.
+        # Solo narración, sin música de fondo: aplicar también un pequeño fade-in
+        # y denoise opcional.
         voice_label = f"[{voice_index}:a]"
+        fade_label = "[a_fade]"
         audio_out_label = "[aout]"
         filter_parts.append(
-            f"{voice_label}afade=t=in:st=0:d=0.1{audio_out_label}"
+            f"{voice_label}afade=t=in:st=0:d=0.1{fade_label}"
         )
+        if ENABLE_AUDIO_DENOISE:
+            filter_parts.append(
+                f"{fade_label}{AUDIO_DENOISE_FILTER}{audio_out_label}"
+            )
+        else:
+            filter_parts.append(
+                f"{fade_label}anull{audio_out_label}"
+            )
         audio_map_label = audio_out_label
 
     filter_complex = "; ".join(filter_parts)
