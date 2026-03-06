@@ -11,15 +11,22 @@ BOOK_DIR = "jardin"
 OUTPUT_VIDEO_NAME = None
 IMAGE_DURATION_SECONDS: float | None = None
 
-# Efecto Ken Burns simple en modo FFmpeg (no usado actualmente, placeholder para futuras mejoras).
-ZOOM_IN_OUT = False
+WIDTH = 1920
+HEIGHT = 1080
+FPS = 24
 
 # Pausa de silencio entre audios al concatenar (en segundos). 0.0 = sin pausa.
 AUDIO_GAP_SECONDS = 1.0
 
-WIDTH = 1920
-HEIGHT = 1080
-FPS = 24
+# Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).
+MUSIC_VOLUME = 0.04
+
+# Tipo de transición para el primer cambio de imagen (xfade transition=...).
+FIRST_TRANSITION = "slideleft"
+# Tipo de transición para el resto de cambios de imagen.
+OTHER_TRANSITION = "slideright"
+# Duración de cada transición en segundos.
+TRANSITION_DURATION = 0.8
 
 
 def _ffmpeg_has_nvenc() -> bool:
@@ -185,6 +192,8 @@ def _export_simple_slideshow_with_ffmpeg(
     video_dir: str,
     parts: List[Tuple[str, List[str]]],
     duration_per_image: float | None,
+    music_paths: List[str],
+    music_volume: float,
     ffmpeg_exe: str,
     use_gpu: bool,
     gpu_index: int,
@@ -210,69 +219,117 @@ def _export_simple_slideshow_with_ffmpeg(
         return
 
     wav_path = os.path.join(video_dir, f"{book_name}_audio.wav")
-    images_list_path = os.path.join(video_dir, f"{book_name}_images.txt")
 
     concat_audio_to_wav(audio_paths_ordered, wav_path)
     print(f"Audio concatenado: {wav_path}")
 
-    with open(images_list_path, "w", encoding="utf-8") as f:
-        for idx, (img_path, dur) in enumerate(image_entries):
-            norm_path = _normalize_path_for_ffmpeg(img_path)
-            f.write(f"file '{norm_path}'\n")
-            if idx < len(image_entries) - 1:
-                dur_safe = max(dur, 0.01)
-                f.write(f"duration {dur_safe:.6f}\n")
-
-    print(f"Lista de imágenes para FFmpeg: {images_list_path}")
-
     out_name = f"{book_name}.mp4"
-    if out_name.lower().endswith(".mp4") is False:
+    if not out_name.lower().endswith(".mp4"):
         out_name += ".mp4"
     output_path = os.path.join(video_dir, out_name)
 
-    if ZOOM_IN_OUT and duration_per_image is not None and duration_per_image > 0:
-        d = duration_per_image
-        vf_expr = (
-            "zoompan="
-            "z='if(eq(mod(floor(t/"
-            f"{d}"
-            "),2),0,"
-            "1+0.05*((t-floor(t/"
-            f"{d}"
-            ")*"
-            f"{d}"
-            ")/"
-            f"{d}"
-            "),"
-            "1.05-0.05*((t-floor(t/"
-            f"{d}"
-            ")*"
-            f"{d}"
-            ")/"
-            f"{d}"
-            "))')"
-            ":x='(iw-ow)/2':y='(ih-oh)/2'"
-            f":s={WIDTH}x{HEIGHT}:fps={FPS}"
-        )
+    # Preparar pista(s) de música de fondo, si existen.
+    music_wav_path: str | None = None
+    if music_paths:
+        # Por simplicidad, soportamos música en WAV y la concatenamos como con la narración.
+        wav_music_paths = [p for p in music_paths if p.lower().endswith(".wav")]
+        if wav_music_paths:
+            music_wav_path = os.path.join(video_dir, f"{book_name}_music.wav")
+            concat_audio_to_wav(wav_music_paths, music_wav_path)
+            print(f"Música concatenada: {music_wav_path}")
+        else:
+            print("ADVERTENCIA: Se encontraron pistas de música pero ninguna en formato WAV; se ignorarán.")
+
+    # Asegurarnos de que las duraciones sean válidas y ajustar TRANSITION_DURATION si hace falta.
+    durations = [max(d, 0.01) for _img, d in image_entries]
+    if len(durations) >= 2 and TRANSITION_DURATION >= min(durations):
+        # Reducir ligeramente para que siempre haya algo de zona sin transición.
+        effective_transition = max(min(durations) * 0.4, 0.1)
     else:
-        vf_expr = (
+        effective_transition = TRANSITION_DURATION
+
+    # Construir entradas de imágenes: una por imagen, usando loop 1.
+    cmd: List[str] = [ffmpeg_exe, "-y"]
+    for img_path, dur in image_entries:
+        norm_path = _normalize_path_for_ffmpeg(img_path)
+        dur_safe = max(dur, 0.01)
+        cmd += ["-loop", "1", "-t", f"{dur_safe:.6f}", "-i", norm_path]
+
+    # Añadir el audio de narración como entrada adicional.
+    voice_index = len(image_entries)
+    cmd += ["-i", wav_path]
+
+    # Añadir música (si existe) como entrada adicional.
+    music_index: int | None = None
+    if music_wav_path is not None:
+        music_index = len(image_entries) + 1
+        cmd += ["-i", music_wav_path]
+
+    # Construir filter_complex con scale+crop, cadena de xfade y mezcla de audio opcional.
+    filter_parts: List[str] = []
+    scaled_labels: List[str] = []
+    for idx in range(len(image_entries)):
+        in_label = f"[{idx}:v]"
+        out_label = f"[v{idx}]"
+        scaled_labels.append(out_label)
+        scale_crop = (
+            f"{in_label}"
             f"scale='if(gt(a,{WIDTH}/{HEIGHT}),-2,{WIDTH})'"
             f":'if(gt(a,{WIDTH}/{HEIGHT}),{HEIGHT},-2)',"
-            f"crop={WIDTH}:{HEIGHT}"
+            f"crop={WIDTH}:{HEIGHT}{out_label}"
         )
-    cmd: List[str] = [
-        ffmpeg_exe,
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        images_list_path,
-        "-i",
-        wav_path,
-        "-vf",
-        vf_expr,
+        filter_parts.append(scale_crop)
+
+    # Si solo hay una imagen, no aplicamos xfade.
+    if len(scaled_labels) == 1:
+        final_video_label = scaled_labels[0]
+    else:
+        # Primera transición.
+        current_label = scaled_labels[0]
+        current_time = durations[0]
+        for idx in range(1, len(scaled_labels)):
+            next_label = scaled_labels[idx]
+            out_label = f"[xf{idx}]"
+            transition_type = FIRST_TRANSITION if idx == 1 else OTHER_TRANSITION
+            offset = max(current_time - effective_transition, 0.0)
+            xfade_part = (
+                f"{current_label}{next_label}"
+                f"xfade=transition={transition_type}"
+                f":duration={effective_transition:.6f}"
+                f":offset={offset:.6f}{out_label}"
+            )
+            filter_parts.append(xfade_part)
+            current_time = current_time + durations[idx] - effective_transition
+            current_label = out_label
+        final_video_label = current_label
+
+    audio_map_label: str
+    if music_index is not None:
+        # Mezclar narración + música con volumen configurable.
+        voice_label = f"[{voice_index}:a]"
+        music_label = f"[{music_index}:a]"
+        music_vol_label = "[music_vol]"
+        audio_out_label = "[aout]"
+        filter_parts.append(
+            f"{music_label}volume={music_volume:.3f}{music_vol_label}"
+        )
+        filter_parts.append(
+            f"{voice_label}{music_vol_label}amix=inputs=2:normalize=0{audio_out_label}"
+        )
+        audio_map_label = audio_out_label
+    else:
+        # Solo narración, sin música de fondo.
+        audio_map_label = f"[{voice_index}:a]"
+
+    filter_complex = "; ".join(filter_parts)
+
+    cmd += [
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        final_video_label,
+        "-map",
+        audio_map_label,
         "-r",
         str(FPS),
     ]
@@ -393,6 +450,13 @@ def main() -> None:
         help="Segundos por imagen (por defecto: reparto equitativo según audio).",
     )
     parser.add_argument(
+        "--music-volume",
+        type=float,
+        default=MUSIC_VOLUME,
+        metavar="FACTOR",
+        help="Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).",
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help="Nombre del archivo de salida (ej. mi_video.mp4).",
@@ -435,9 +499,21 @@ def main() -> None:
 
     duration_per_image = args.image_duration if args.image_duration is not None else IMAGE_DURATION_SECONDS
 
+    # Descubrir carpeta de música opcional.
+    music_dir = os.path.join(book_dir, "music")
+    music_paths: List[str] = []
+    if os.path.isdir(music_dir):
+        for fname in sorted(os.listdir(music_dir)):
+            if fname.lower().endswith(".wav"):
+                music_paths.append(os.path.join(music_dir, fname))
+
     print(f"Libro: {book_name}")
     print(f"Audio: {audio_dir}")
     print(f"Imágenes: {img_dir}")
+    if music_paths:
+        print(f"Música de fondo: {music_dir} ({len(music_paths)} archivo(s) WAV)")
+    else:
+        print("Música de fondo: (ninguna pista WAV encontrada en 'music/')")
     print(f"Salida video: {video_dir}")
 
     parts = collect_parts_audio_and_images(audio_dir, img_dir)
@@ -470,7 +546,7 @@ def main() -> None:
                 edl_entries,
                 edl_path,
                 fps=FPS,
-                transition_duration_sec=args.transition_duration,
+                transition_duration_sec=TRANSITION_DURATION,
             )
             print(f"EDL: {edl_path}")
         concat_audio_to_wav(audio_paths_ordered, wav_path)
@@ -514,6 +590,7 @@ def main() -> None:
             print('   PowerShell: $env:IMAGEIO_FFMPEG_EXE = "C:\\Users\\Yonex\\Downloads\\ffmpeg\\bin\\ffmpeg.exe"', file=sys.stderr)
         sys.exit(1)
 
+    # Modo por defecto: slideshow simple con FFmpeg, sin MoviePy
     use_gpu_simple = args.gpu
     if use_gpu_simple and not _ffmpeg_has_nvenc():
         print("AVISO: El FFmpeg configurado no incluye NVENC (GPU). Se usará CPU (libx264).")
@@ -525,6 +602,8 @@ def main() -> None:
         video_dir=video_dir,
         parts=parts,
         duration_per_image=duration_per_image,
+        music_paths=music_paths,
+        music_volume=args.music_volume,
         ffmpeg_exe=_ffmpeg_exe,
         use_gpu=use_gpu_simple,
         gpu_index=gpu_index_simple,
