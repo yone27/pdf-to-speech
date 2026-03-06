@@ -18,6 +18,9 @@ FPS = 24
 # Pausa de silencio entre audios al concatenar (en segundos). 0.0 = sin pausa.
 AUDIO_GAP_SECONDS = 1.0
 
+# Segundos a recortar del inicio de cada audio de narración (para eliminar ruidos de arranque).
+AUDIO_TRIM_START_SECONDS = 0.3
+
 # Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).
 MUSIC_VOLUME = 0.04
 
@@ -118,7 +121,11 @@ def _seconds_to_timecode(sec: float, fps: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
 
 
-def concat_audio_to_wav(audio_paths: List[str], output_wav_path: str) -> None:
+def concat_audio_to_wav(
+    audio_paths: List[str],
+    output_wav_path: str,
+    trim_start_seconds: float = 0.0,
+) -> None:
     if not audio_paths:
         raise ValueError("concat_audio_to_wav: lista de audio vacía")
     nchannels = sampwidth = framerate = None
@@ -142,7 +149,19 @@ def concat_audio_to_wav(audio_paths: List[str], output_wav_path: str) -> None:
                             f"WAV {path} tiene formato distinto al primero "
                             f"(nchannels/sampwidth/framerate deben coincidir)"
                         )
-                out_wav.writeframes(inp.readframes(inp.getnframes()))
+                # Descartar un pequeño tramo inicial si se ha configurado recorte.
+                nframes_total = inp.getnframes()
+                trim_frames = 0
+                if trim_start_seconds > 0.0 and framerate:
+                    trim_frames = int(trim_start_seconds * framerate)
+                    if trim_frames > nframes_total:
+                        trim_frames = nframes_total
+                    if trim_frames > 0:
+                        _ = inp.readframes(trim_frames)
+
+                remaining_frames = nframes_total - trim_frames
+                if remaining_frames > 0:
+                    out_wav.writeframes(inp.readframes(remaining_frames))
 
             if AUDIO_GAP_SECONDS > 0.0 and idx < len(audio_paths) - 1:
                 assert nchannels is not None and sampwidth is not None and framerate is not None
@@ -200,6 +219,7 @@ def _export_simple_slideshow_with_ffmpeg(
     video_dir: str,
     parts: List[Tuple[str, List[str]]],
     duration_per_image: float | None,
+    audio_trim_start_seconds: float,
     music_paths: List[str],
     music_volume: float,
     ffmpeg_exe: str,
@@ -214,6 +234,8 @@ def _export_simple_slideshow_with_ffmpeg(
         if not image_paths:
             continue
         audio_duration = get_audio_duration_seconds(audio_path)
+        if audio_trim_start_seconds > 0.0:
+            audio_duration = max(0.0, audio_duration - audio_trim_start_seconds)
         n = len(image_paths)
         if duration_per_image is not None:
             dur_per = duration_per_image
@@ -228,7 +250,7 @@ def _export_simple_slideshow_with_ffmpeg(
 
     wav_path = os.path.join(video_dir, f"{book_name}_audio.wav")
 
-    concat_audio_to_wav(audio_paths_ordered, wav_path)
+    concat_audio_to_wav(audio_paths_ordered, wav_path, trim_start_seconds=audio_trim_start_seconds)
     print(f"Audio concatenado: {wav_path}")
 
     out_name = f"{book_name}.mp4"
@@ -330,21 +352,32 @@ def _export_simple_slideshow_with_ffmpeg(
 
     audio_map_label: str
     if music_index is not None:
-        # Mezclar narración + música con volumen configurable.
+        # Mezclar narración + música con volumen configurable y aplicar un pequeño fade-in
+        # para evitar clics/artefactos al inicio.
         voice_label = f"[{voice_index}:a]"
         music_label = f"[{music_index}:a]"
         music_vol_label = "[music_vol]"
+        audio_mix_label = "[a_mix]"
         audio_out_label = "[aout]"
         filter_parts.append(
             f"{music_label}volume={music_volume:.3f}{music_vol_label}"
         )
         filter_parts.append(
-            f"{voice_label}{music_vol_label}amix=inputs=2:normalize=0{audio_out_label}"
+            f"{voice_label}{music_vol_label}amix=inputs=2:normalize=0{audio_mix_label}"
+        )
+        # Fade-in muy corto (0.1 s) para suavizar el arranque del audio.
+        filter_parts.append(
+            f"{audio_mix_label}afade=t=in:st=0:d=0.1{audio_out_label}"
         )
         audio_map_label = audio_out_label
     else:
-        # Solo narración, sin música de fondo.
-        audio_map_label = f"[{voice_index}:a]"
+        # Solo narración, sin música de fondo: aplicar también un pequeño fade-in.
+        voice_label = f"[{voice_index}:a]"
+        audio_out_label = "[aout]"
+        filter_parts.append(
+            f"{voice_label}afade=t=in:st=0:d=0.1{audio_out_label}"
+        )
+        audio_map_label = audio_out_label
 
     filter_complex = "; ".join(filter_parts)
 
@@ -554,6 +587,8 @@ def main() -> None:
             if not image_paths:
                 continue
             audio_duration = get_audio_duration_seconds(audio_path)
+            if AUDIO_TRIM_START_SECONDS > 0.0:
+                audio_duration = max(0.0, audio_duration - AUDIO_TRIM_START_SECONDS)
             n = len(image_paths)
             dur_per = (
                 duration_per_image
@@ -574,7 +609,11 @@ def main() -> None:
                 transition_duration_sec=TRANSITION_DURATION,
             )
             print(f"EDL: {edl_path}")
-        concat_audio_to_wav(audio_paths_ordered, wav_path)
+        concat_audio_to_wav(
+            audio_paths_ordered,
+            wav_path,
+            trim_start_seconds=AUDIO_TRIM_START_SECONDS,
+        )
         print(f"Audio: {wav_path}")
         readme_text = (
             "Importar proyecto en DaVinci Resolve\n"
@@ -627,6 +666,7 @@ def main() -> None:
         video_dir=video_dir,
         parts=parts,
         duration_per_image=duration_per_image,
+        audio_trim_start_seconds=max(AUDIO_TRIM_START_SECONDS, 0.0),
         music_paths=music_paths,
         music_volume=args.music_volume,
         ffmpeg_exe=_ffmpeg_exe,
