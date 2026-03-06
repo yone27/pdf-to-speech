@@ -31,9 +31,11 @@ IMAGE_DURATION_SECONDS: float | None = None
 ZOOM_FACTOR = 1.05
 
 # Efecto Ken Burns simple en modo FFmpeg (--simple-ffmpeg):
-# - Cuando está a True y se usa --image-duration (duración fija por imagen),
-#   se aplica un zoom in/out suave alternando entre imágenes pares/impares.
+# - Cuando está a True, se aplica un zoom in/out suave alternando entre imágenes pares/impares.
 ZOOM_IN_OUT = True
+
+# Pausa de silencio entre audios al concatenar (en segundos). 0.0 = sin pausa.
+AUDIO_GAP_SECONDS = 1
 
 # Transición entre imágenes: "book" (mapeado a dissolve por ahora), "dissolve", "none"
 TRANSITION_TYPE = "book"
@@ -177,7 +179,7 @@ def concat_audio_to_wav(audio_paths: List[str], output_wav_path: str) -> None:
         raise ValueError("concat_audio_to_wav: lista de audio vacía")
     nchannels = sampwidth = framerate = None
     with wave.open(output_wav_path, "wb") as out_wav:
-        for path in audio_paths:
+        for idx, path in enumerate(audio_paths):
             with wave.open(path, "rb") as inp:
                 if nchannels is None:
                     nchannels = inp.getnchannels()
@@ -197,6 +199,14 @@ def concat_audio_to_wav(audio_paths: List[str], output_wav_path: str) -> None:
                             f"(nchannels/sampwidth/framerate deben coincidir)"
                         )
                 out_wav.writeframes(inp.readframes(inp.getnframes()))
+
+            # Insertar silencio entre audios si se ha configurado
+            if AUDIO_GAP_SECONDS > 0.0 and idx < len(audio_paths) - 1:
+                assert nchannels is not None and sampwidth is not None and framerate is not None
+                gap_frames = int(AUDIO_GAP_SECONDS * framerate)
+                if gap_frames > 0:
+                    silence_frame = b"\x00" * sampwidth * nchannels
+                    out_wav.writeframes(silence_frame * gap_frames)
 
 
 def write_edl(
