@@ -21,6 +21,14 @@ AUDIO_GAP_SECONDS = 1.0
 # Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).
 MUSIC_VOLUME = 0.04
 
+# Efecto visual aplicado a cada imagen antes de las transiciones.
+# Valores soportados: "none", "pulse".
+IMAGE_EFFECT = "pulse"
+
+# Parámetros del efecto "pulse" (zoom in-out suave).
+PULSE_STRENGTH = 0.03  # amplitud del zoom (0.03 = +/-3 %)
+PULSE_PERIOD = 4.0     # segundos por ciclo completo de in-out
+
 # Tipo de transición para el primer cambio de imagen (xfade transition=...).
 FIRST_TRANSITION = "slideleft"
 # Tipo de transición para el resto de cambios de imagen.
@@ -265,20 +273,37 @@ def _export_simple_slideshow_with_ffmpeg(
         music_index = len(image_entries) + 1
         cmd += ["-i", music_wav_path]
 
-    # Construir filter_complex con scale+crop, cadena de xfade y mezcla de audio opcional.
+    # Construir filter_complex con scale+crop, efecto opcional y cadena de xfade.
     filter_parts: List[str] = []
     scaled_labels: List[str] = []
     for idx in range(len(image_entries)):
         in_label = f"[{idx}:v]"
-        out_label = f"[v{idx}]"
-        scaled_labels.append(out_label)
+        base_label = f"[b{idx}]"
+        # Primero, escalar y recortar a 1920x1080 (cover).
         scale_crop = (
             f"{in_label}"
             f"scale='if(gt(a,{WIDTH}/{HEIGHT}),-2,{WIDTH})'"
             f":'if(gt(a,{WIDTH}/{HEIGHT}),{HEIGHT},-2)',"
-            f"crop={WIDTH}:{HEIGHT}{out_label}"
+            f"crop={WIDTH}:{HEIGHT}{base_label}"
         )
         filter_parts.append(scale_crop)
+
+        # Después, aplicar efecto por imagen (si está activo).
+        if IMAGE_EFFECT == "pulse":
+            out_label = f"[v{idx}]"
+            period_frames = PULSE_PERIOD * FPS if PULSE_PERIOD > 0 else FPS
+            zoom_expr = (
+                f"{base_label}"
+                f"zoompan=z='1+{PULSE_STRENGTH}*sin(2*PI*on/{period_frames})'"
+                ":x='(iw-ow)/2':y='(ih-oh)/2'"
+                f":s={WIDTH}x{HEIGHT}:fps={FPS}{out_label}"
+            )
+            filter_parts.append(zoom_expr)
+        else:
+            # Sin efecto: usamos directamente la imagen escalada.
+            out_label = base_label
+
+        scaled_labels.append(out_label)
 
     # Si solo hay una imagen, no aplicamos xfade.
     if len(scaled_labels) == 1:
