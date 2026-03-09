@@ -10,16 +10,17 @@ DEFAULT_TOPIC = "Proteína GRATIS Durante 10 Años: El Sistema del Estanque Cerr
 
 # Parámetros de duración y estructura
 TARGET_MINUTES_DEFAULT = 20
-SECTIONS_DEFAULT = 3
+SECTIONS_DEFAULT = 7
 WORDS_PER_MINUTE_DEFAULT = 140
 
 # Personalización principal del guion
 DEFAULT_AUDIENCE = "público general"
 DEFAULT_TONE = "entretenido, claro y con ritmo"
-DEFAULT_LANG = "español"
+DEFAULT_LANG = "ingles"
 
 # Salida por defecto
-OUTPUT_BASE_DIR_DEFAULT = "./scripts_output"
+# Carpeta base = esta misma carpeta de scripts_guion_largo
+OUTPUT_BASE_DIR_DEFAULT = os.path.join(os.path.dirname(__file__), "scripts_output")
 OUTPUT_FILENAME_PREFIX = "guion_"
 
 # Archivos intermedios

@@ -1,7 +1,7 @@
 import json
 import os
 
-from .config import (
+from scripts_guion_largo.config import (
     DEFAULT_TOPIC,
     OUTPUT_BASE_DIR_DEFAULT,
     TARGET_MINUTES_DEFAULT,
@@ -9,8 +9,8 @@ from .config import (
     get_outline_path,
     get_run_dir,
 )
-from .gemini_client import load_api_key
-from .outline import generate_outline
+from scripts_guion_largo.gemini_client import load_api_key
+from scripts_guion_largo.outline import generate_outline
 
 
 def main() -> None:

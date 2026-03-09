@@ -1,9 +1,9 @@
 import json
 from typing import List, Optional
 
-from .config import DEFAULT_LANG, DEFAULT_TONE, MODEL_NAME_TEXT
-from .gemini_client import call_gemini, contar_palabras
-from .outline import IndiceGuion, ParteIndice
+from scripts_guion_largo.config import DEFAULT_LANG, DEFAULT_TONE, MODEL_NAME_TEXT
+from scripts_guion_largo.gemini_client import call_gemini, contar_palabras
+from scripts_guion_largo.outline import IndiceGuion, ParteIndice
 
 
 def generate_section(

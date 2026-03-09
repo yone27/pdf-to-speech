@@ -7,7 +7,7 @@ from typing import Optional
 import requests
 from dotenv import load_dotenv
 
-from .config import MODEL_NAME_TEXT, REQUEST_TIMEOUT, MAX_RETRIES
+from scripts_guion_largo.config import MODEL_NAME_TEXT, REQUEST_TIMEOUT, MAX_RETRIES
 
 
 load_dotenv()

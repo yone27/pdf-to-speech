@@ -2,8 +2,8 @@ import json
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from .config import DEFAULT_AUDIENCE, DEFAULT_LANG, DEFAULT_TONE, MODEL_NAME_TEXT
-from .gemini_client import call_gemini
+from scripts_guion_largo.config import DEFAULT_AUDIENCE, DEFAULT_LANG, DEFAULT_TONE, MODEL_NAME_TEXT
+from scripts_guion_largo.gemini_client import call_gemini
 
 
 @dataclass

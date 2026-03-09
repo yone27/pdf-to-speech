@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-from .config import (
+from scripts_guion_largo.config import (
     DEFAULT_TOPIC,
     DEFAULT_TONE,
     TARGET_MINUTES_DEFAULT,
@@ -10,8 +10,8 @@ from .config import (
     get_sections_dir,
     get_run_dir,
 )
-from .gemini_client import contar_palabras, load_api_key
-from .merge import merge_sections
+from scripts_guion_largo.gemini_client import contar_palabras, load_api_key
+from scripts_guion_largo.merge import merge_sections
 
 
 def load_sections(topic: str) -> List[str]:
