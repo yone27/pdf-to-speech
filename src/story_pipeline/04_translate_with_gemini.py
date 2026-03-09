@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+import shutil
 from typing import Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
@@ -10,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SOURCE_BOOK_DIR = "jardin"
+SOURCE_BOOK_DIR = "frutales"
 TARGET_LANG_CODE = "en"
 MODEL_NAME = "gemini-2.5-pro"
 SKIP_EXISTING = True  # Si True, no vuelve a traducir archivos ya generados en la carpeta destino
@@ -45,6 +46,50 @@ def resolve_book_dirs(source_book_dir: str, target_lang: str) -> Tuple[str, str,
     os.makedirs(dst_text_dir, exist_ok=True)
 
     return src_book_dir, src_text_dir, dst_book_dir, dst_text_dir
+
+
+def copy_images_tree(
+    src_book_dir: str,
+    dst_book_dir: str,
+    *,
+    skip_existing: bool,
+) -> None:
+    """
+    Copia la carpeta img/ del libro origen al libro destino,
+    preservando la estructura y nombres de archivo.
+    """
+    src_img_root = os.path.join(src_book_dir, "img")
+    if not os.path.isdir(src_img_root):
+        # Nada que copiar; es válido si el libro aún no tiene imágenes.
+        print(f"No se encontró carpeta de imágenes en origen: {src_img_root}")
+        return
+
+    dst_img_root = os.path.join(dst_book_dir, "img")
+
+    copied = 0
+    skipped = 0
+
+    for root, _dirs, files in os.walk(src_img_root):
+        rel_root = os.path.relpath(root, src_img_root)
+        dst_root = os.path.join(dst_img_root, rel_root)
+        os.makedirs(dst_root, exist_ok=True)
+
+        for name in files:
+            src_path = os.path.join(root, name)
+            dst_path = os.path.join(dst_root, name)
+
+            if skip_existing and os.path.isfile(dst_path):
+                skipped += 1
+                continue
+
+            shutil.copy2(src_path, dst_path)
+            copied += 1
+
+    print("\nCopia de imágenes:")
+    print(f"  Origen img/:  {src_img_root}")
+    print(f"  Destino img/: {dst_img_root}")
+    print(f"  Archivos copiados: {copied}")
+    print(f"  Archivos saltados: {skipped}")
 
 
 def build_gemini_url(model_name: str, api_key: str) -> str:
@@ -360,6 +405,14 @@ def main() -> None:
         api_key=api_key,
         skip_existing=skip_existing,
         workers=args.workers,
+    )
+
+    # Copiar también las imágenes del libro origen al libro traducido.
+    # Usa la misma semántica de skip_existing para no sobrescribir por defecto.
+    copy_images_tree(
+        src_book_dir,
+        dst_book_dir,
+        skip_existing=skip_existing,
     )
 
 

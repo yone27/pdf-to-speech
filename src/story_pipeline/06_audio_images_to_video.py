@@ -7,7 +7,7 @@ import time
 import wave
 from typing import List, Tuple
 
-BOOK_DIR = "jardin"
+BOOK_DIR = "frutales-en"
 OUTPUT_VIDEO_NAME = None
 IMAGE_DURATION_SECONDS: float | None = None
 
@@ -23,7 +23,7 @@ AUDIO_TRIM_START_SECONDS = 0.1
 
 # Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).
 #MUSIC_VOLUME = 0.04
-MUSIC_VOLUME = 0.0
+MUSIC_VOLUME = 0.04
 
 # Denoise opcional sobre el audio final (narración +/- música).
 # Parámetros suaves para estática leve: nr=reducción (dB), nf=umbral, tn=1 adapta al contenido.
@@ -37,7 +37,7 @@ IMAGE_EFFECT = "pulse"
 
 # Parámetros del efecto "pulse" (zoom in-out suave).
 PULSE_STRENGTH = 0.03  # amplitud del zoom (0.03 = +/-3 %)
-PULSE_PERIOD = 4.0     # segundos por ciclo completo de in-out
+PULSE_PERIOD = 10.0     # segundos por ciclo completo de in-out
 
 # Tipo de transición para el primer cambio de imagen (xfade transition=...).
 FIRST_TRANSITION = "slideleft"
@@ -45,6 +45,11 @@ FIRST_TRANSITION = "slideleft"
 OTHER_TRANSITION = "slideright"
 # Duración de cada transición en segundos.
 TRANSITION_DURATION = 0.8
+
+# Si es False, los WAV intermedios generados solo para el render con FFmpeg
+# (por capítulo: *_audio.wav, *_music.wav) se eliminarán automáticamente
+# tras generar el MP4. Los WAV usados para --export-resolve siempre se conservan.
+KEEP_INTERMEDIATE_AUDIO_FILES = False
 
 
 def _ffmpeg_has_nvenc() -> bool:
@@ -465,6 +470,15 @@ def _export_simple_slideshow_with_ffmpeg(
     print(f"Listo (slideshow simple FFmpeg): {output_path}")
     print(f"Tiempo de render (FFmpeg): {elapsed:.1f} s ({elapsed / 60:.1f} min)")
 
+    # Limpiar WAV intermedios si no se desean conservar.
+    if not KEEP_INTERMEDIATE_AUDIO_FILES:
+        for tmp_path in (wav_path, music_wav_path):
+            if tmp_path and os.path.isfile(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
 
 def collect_parts_audio_and_images(
     audio_dir: str, img_dir: str
@@ -681,26 +695,58 @@ def main() -> None:
             print('   PowerShell: $env:IMAGEIO_FFMPEG_EXE = "C:\\Users\\Yonex\\Downloads\\ffmpeg\\bin\\ffmpeg.exe"', file=sys.stderr)
         sys.exit(1)
 
-    # Modo por defecto: slideshow simple con FFmpeg, sin MoviePy
+    # Modo por defecto: slideshow simple con FFmpeg, sin MoviePy.
+    # Para evitar errores de Windows por comandos demasiado largos (WinError 206),
+    # generamos un MP4 por capítulo (subcarpeta de audio/img) en lugar de uno solo gigante.
     use_gpu_simple = args.gpu
     if use_gpu_simple and not _ffmpeg_has_nvenc():
         print("AVISO: El FFmpeg configurado no incluye NVENC (GPU). Se usará CPU (libx264).")
         use_gpu_simple = False
     gpu_index_simple = args.gpu_index
-    print("Usando slideshow simple con FFmpeg (sin MoviePy).")
-    _export_simple_slideshow_with_ffmpeg(
-        book_name=book_name,
-        video_dir=video_dir,
-        parts=parts,
-        duration_per_image=duration_per_image,
-        audio_trim_start_seconds=max(AUDIO_TRIM_START_SECONDS, 0.0),
-        music_paths=music_paths,
-        music_volume=args.music_volume,
-        ffmpeg_exe=_ffmpeg_exe,
-        use_gpu=use_gpu_simple,
-        gpu_index=gpu_index_simple,
-        preset=args.preset,
-    )
+
+    # Agrupar partes por "capítulo" según la subcarpeta relativa dentro de audio_dir.
+    chapters: dict[str, list[tuple[str, list[str]]]] = {}
+    for audio_path, image_paths in parts:
+        rel = os.path.relpath(audio_path, audio_dir)
+        chapter_key = os.path.dirname(rel)  # '' si está en la raíz
+        chapters.setdefault(chapter_key, []).append((audio_path, image_paths))
+
+    print("Usando slideshow simple con FFmpeg (sin MoviePy), exportando por capítulos:")
+    for chapter_key, chapter_parts in chapters.items():
+        # Sufijo seguro para el nombre del archivo de salida.
+        # Ej: '' -> 'full', 'cap 1' -> 'cap-1', 'cap 1/sub' -> 'cap-1_sub'
+        safe_suffix = chapter_key or "full"
+        safe_suffix = safe_suffix.replace(os.sep, "_")
+        safe_suffix = re.sub(r"\s+", "-", safe_suffix)
+        chapter_book_name = f"{book_name}-{safe_suffix}"
+        chapter_out_name = f"{chapter_book_name}.mp4"
+        chapter_output_path = os.path.join(video_dir, chapter_out_name)
+
+        if os.path.isfile(chapter_output_path):
+            print(
+                f"  - Capítulo '{chapter_key or 'root'}': ya existe {chapter_out_name}, se omite."
+            )
+            continue
+
+        print(
+            f"  - Capítulo '{chapter_key or 'root'}' -> {chapter_out_name} "
+            f"({len(chapter_parts)} parte(s))"
+        )
+
+        _export_simple_slideshow_with_ffmpeg(
+            book_name=chapter_book_name,
+            video_dir=video_dir,
+            parts=chapter_parts,
+            duration_per_image=duration_per_image,
+            audio_trim_start_seconds=max(AUDIO_TRIM_START_SECONDS, 0.0),
+            music_paths=music_paths,
+            music_volume=args.music_volume,
+            ffmpeg_exe=_ffmpeg_exe,
+            use_gpu=use_gpu_simple,
+            gpu_index=gpu_index_simple,
+            preset=args.preset,
+        )
+
     return
 
 

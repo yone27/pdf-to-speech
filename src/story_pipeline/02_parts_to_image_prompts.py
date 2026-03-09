@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOOK_DIR = "jardin"
+BOOK_DIR = "frutales"
 NUM_IMAGES_PER_PART = 10
 MODEL_NAME_TEXT = "gemini-2.5-pro"
 NUM_WORKERS = 3  # 1 = secuencial; >1 = procesamiento en paralelo
@@ -23,7 +23,10 @@ PROMPT_TEMPLATE = (
   "Requisitos:\n"
   "- Cada prompt debe ir en una línea separada.\n"
   "- No incluyas numeración ni viñetas, solo el texto del prompt.\n"
-  "- Describe escenas visuales variadas y coherentes con el texto.\n\n"
+  "- Describe escenas visuales claras y fáciles de ilustrar.\n"
+  "- Prioriza composiciones simples con uno o pocos elementos principales.\n"
+  "- Las escenas deben funcionar bien como ilustraciones educativas o diagramas.\n"
+  "- No incluyas texto, títulos ni tipografía dentro de la imagen.\n\n"
   "Texto:\n"
   "{part_text}"
 )

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SOURCE_BOOK_DIR = "jardin"
+SOURCE_BOOK_DIR = "frutales"
 SOURCE_TXT_FALLBACK = None
 IMAGE_MODEL_NAME = "gemini-2.5-flash-image"
 IMAGES_FORMAT = "png"
@@ -18,6 +18,43 @@ REQUEST_TIMEOUT = 120.0
 MAX_RETRIES = 3
 MAX_CONCURRENT_PER_PART = 2 
 SKIP_EXISTING = True  # Si True, no re-genera imágenes que ya existen
+
+# Descripción global de estilo para TODAS las imágenes (personalizable)
+# Ejemplo: "children's book illustration style, soft pastel colors, watercolor, 4k, highly detailed"
+GLOBAL_IMAGE_STYLE: str = """
+Vintage agricultural handbook illustration style, watercolor and ink drawing.
+
+Aged beige paper background with subtle paper texture.
+
+Muted earthy colors, soft watercolor shading, delicate ink outlines.
+
+Classic botanical and farming encyclopedia illustration aesthetic.
+
+Clean educational diagram style with simple composition and clear visual elements.
+
+no text
+no captions
+no typography
+"""
+# Configuración opcional de personaje recurrente (por ejemplo Paco la Patata)
+# Capítulos (slugs de carpeta dentro de img/) donde debe aparecer el personaje.
+# Por defecto se pensó en "cap 1", "cap 2", pero puedes adaptarlo a tus slugs reales.
+CHARACTER_CHAPTERS: list[str] = [
+    "cap 1",
+    "cap 2",
+]
+
+# Descripción del personaje. Se añadirá como texto extra en los capítulos configurados.
+# Ejemplo para Paco la Patata:
+# "Paco la Patata, a friendly potato-shaped farmer character with big expressive eyes, straw hat, blue shirt, brown overalls and boots, vintage farming illustration style"
+CHARACTER_DESCRIPTION: str = "Paco la Patata, a friendly potato-shaped farmer character with big expressive eyes, straw hat, blue shirt, brown overalls and boots, vintage farming illustration style"
+
+# Palabras clave que indican que el prompt realmente muestra al personaje.
+# Solo cuando el prompt contenga alguna de estas palabras se añadirá CHARACTER_DESCRIPTION.
+CHARACTER_PROMPT_KEYWORDS: List[str] = [
+  "paco la patata",
+  "paco",
+]
 
 def load_api_key() -> str:
   api_key = os.getenv("GEMINI_API_KEY")
@@ -188,8 +225,30 @@ def main() -> None:
         continue
 
       print(f"  - Generando imagen {idx}/{len(prompts)} para {base_name}...")
+
+      # Construimos el prompt final aplicando estilo global y, si corresponde, personaje.
+      final_prompt = prompt
+
+      if GLOBAL_IMAGE_STYLE:
+        final_prompt = f"{GLOBAL_IMAGE_STYLE}\n\n{final_prompt}"
+
+      # Solo añadimos la descripción del personaje si:
+      # - Hay descripción configurada
+      # - El capítulo está marcado en CHARACTER_CHAPTERS
+      # - El prompt menciona explícitamente al personaje (según las palabras clave)
+      if (
+        CHARACTER_DESCRIPTION
+        and chapter_slug in CHARACTER_CHAPTERS
+        and any(
+          keyword.lower() in prompt.lower()
+          for keyword in CHARACTER_PROMPT_KEYWORDS
+        )
+      ):
+        final_prompt = f"{final_prompt}\n\n{CHARACTER_DESCRIPTION}"
+        print(f"    [INFO] Añadiendo personaje al prompt de {img_filename}")
+
       image_bytes = generate_image_for_prompt(
-        prompt,
+        final_prompt,
         model_name=IMAGE_MODEL_NAME,
         api_key=api_key,
       )
