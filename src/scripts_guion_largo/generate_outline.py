@@ -1,5 +1,12 @@
-import json
 import os
+import sys
+
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_src_dir = os.path.dirname(_script_dir)
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+import json
 
 from scripts_guion_largo.config import (
     DEFAULT_TOPIC,
