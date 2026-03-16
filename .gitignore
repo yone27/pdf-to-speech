@@ -9,4 +9,5 @@
 *.mp4
 *.json
 *.pyc
-/scripts_guion_largo/scripts_output
+/scripts_guion_largo/scripts_output/*
+*.md

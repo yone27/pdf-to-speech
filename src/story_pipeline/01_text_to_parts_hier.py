@@ -1,7 +1,7 @@
 import os
 import re
 
-SOURCE_TXT = "frutales.txt"
+SOURCE_TXT = "guion.txt"
 MAX_CHARS = 3500
 OUTPUT_DIR = None
 

@@ -11,13 +11,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SOURCE_BOOK_DIR = "frutales"
-TARGET_LANG_CODE = "en"
+SOURCE_BOOK_DIR = "guion"
+TARGET_LANG_CODE = "de"
 MODEL_NAME = "gemini-2.5-pro"
 SKIP_EXISTING = True  # Si True, no vuelve a traducir archivos ya generados en la carpeta destino
 REQUEST_TIMEOUT = 60.0
 MAX_RETRIES = 3
-DEFAULT_WORKERS = 2
+DEFAULT_WORKERS = 5
 
 
 class GeminiTranslationError(Exception):

@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable, List, Tuple
 
 import requests
@@ -10,14 +11,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SOURCE_BOOK_DIR = "frutales"
+SOURCE_BOOK_DIR = "guion"
 SOURCE_TXT_FALLBACK = None
 IMAGE_MODEL_NAME = "gemini-2.5-flash-image"
 IMAGES_FORMAT = "png"
 REQUEST_TIMEOUT = 120.0
 MAX_RETRIES = 3
-MAX_CONCURRENT_PER_PART = 2 
+MAX_CONCURRENT_PER_PART = 5 
 SKIP_EXISTING = True  # Si True, no re-genera imágenes que ya existen
+
+# Configuración para Batch API de Gemini
+USE_BATCH_API = False  # Mantener comportamiento actual por defecto
+BATCH_SIZE = 80  # Número máximo de prompts por batch
+MAX_BATCH_RETRIES = 3  # Reintentos si un batch completo falla
+BATCH_POLL_INTERVAL = 10.0  # Segundos entre consultas de estado del batch
+BATCH_TOTAL_TIMEOUT = 60 * 60.0  # Tiempo máximo total (en segundos) esperando un batch
 
 # Descripción global de estilo para TODAS las imágenes (personalizable)
 # Ejemplo: "children's book illustration style, soft pastel colors, watercolor, 4k, highly detailed"
@@ -76,6 +84,23 @@ def build_gemini_url(model_name: str, api_key: str) -> str:
   else:
     model_path = model_name
   return f"{base_url}/{model_path}:generateContent?key={api_key}"
+
+
+def build_gemini_batch_url(model_name: str, api_key: str) -> str:
+  """
+  Construye la URL para la Batch API de Gemini usando el mismo host base.
+  Usa el endpoint REST documentado:
+    POST https://generativelanguage.googleapis.com/v1beta/models/{model}:batchGenerateContent
+  """
+  base_url = os.getenv(
+    "GEMINI_API_BASE_URL",
+    "https://generativelanguage.googleapis.com/v1beta",
+  )
+  if not model_name.startswith("models/"):
+    model_path = f"models/{model_name}"
+  else:
+    model_path = model_name
+  return f"{base_url}/{model_path}:batchGenerateContent?key={api_key}"
 
 
 def resolve_book_dir() -> Tuple[str, str]:
@@ -189,6 +214,332 @@ def generate_image_for_prompt(
   raise RuntimeError(f"Falló la generación de imagen tras {max_retries} intentos: {last_error}")
 
 
+def batch_generate_images_for_prompts(
+  prompts: List[str],
+  *,
+  model_name: str,
+  api_key: str,
+  max_retries: int = MAX_BATCH_RETRIES,
+) -> List[bytes | None]:
+  """
+  Llama a la Batch API de Gemini (models.batchGenerateContent) para un conjunto de prompts.
+
+  - Crea un recurso GenerateContentBatch con peticiones "inlined".
+  - Hace polling de la operación hasta que termina o se agota BATCH_TOTAL_TIMEOUT.
+  - Devuelve una lista de la misma longitud que `prompts` con los bytes de cada imagen
+    (o None si no se pudo extraer la imagen para ese prompt en concreto).
+  """
+  url = build_gemini_batch_url(model_name, api_key)
+
+  # Normalizamos el nombre del modelo para ponerlo también en el cuerpo del batch,
+  # siguiendo el esquema de GenerateContentBatch.
+  if not model_name.startswith("models/"):
+    model_path = f"models/{model_name}"
+  else:
+    model_path = model_name
+
+  payload = {
+    "batch": {
+      "model": model_path,
+      "displayName": f"image-batch-{int(time.time())}",
+      "inputConfig": {
+        "requests": {
+          "requests": [
+            {
+              "request": {
+                "contents": [
+                  {
+                    "parts": [
+                      {"text": prompt},
+                    ]
+                  }
+                ]
+              },
+              "metadata": {"index": idx},
+            }
+            for idx, prompt in enumerate(prompts)
+          ]
+        }
+      },
+    }
+  }
+
+  headers = {
+    "Content-Type": "application/json",
+  }
+
+  last_error: Exception | None = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      # 1) Crear el batch (obtendremos una Operation)
+      response = requests.post(
+        url,
+        headers=headers,
+        data=json.dumps(payload),
+        timeout=REQUEST_TIMEOUT,
+      )
+      if not response.ok:
+        raise RuntimeError(
+          f"Respuesta no exitosa de Gemini Batch (status={response.status_code}): {response.text[:500]}"
+        )
+
+      data = response.json()
+      operation_name = data.get("name")
+      if not operation_name:
+        raise RuntimeError("La respuesta de batch no contiene 'name' de la operación.")
+
+      # 2) Polling de la operación hasta que termine o se agote el timeout total
+      base_url = os.getenv(
+        "GEMINI_API_BASE_URL",
+        "https://generativelanguage.googleapis.com/v1beta",
+      )
+      operation_url = f"{base_url}/{operation_name}?key={api_key}"
+
+      start_time = time.time()
+
+      while True:
+        if time.time() - start_time > BATCH_TOTAL_TIMEOUT:
+          raise RuntimeError(
+            f"Timeout esperando a que termine la operación de batch ({BATCH_TOTAL_TIMEOUT}s)."
+          )
+
+        op_resp = requests.get(operation_url, timeout=REQUEST_TIMEOUT)
+        if not op_resp.ok:
+          raise RuntimeError(
+            f"Error al leer estado de la operación de batch (status={op_resp.status_code}): "
+            f"{op_resp.text[:500]}"
+          )
+
+        op_data = op_resp.json()
+        if not op_data.get("done"):
+          time.sleep(BATCH_POLL_INTERVAL)
+          continue
+
+        # Si hay error en la operación, lo propagamos
+        if op_data.get("error"):
+          raise RuntimeError(f"Error en operación de batch: {op_data['error']}")
+
+        # 3) Extraemos las respuestas inlined del GenerateContentBatch
+        batch = op_data.get("response") or {}
+        output = batch.get("output") or {}
+        responses_file = output.get("responsesFile")
+
+        images: List[bytes | None] = []
+
+        if responses_file:
+          # Caso principal: las respuestas vienen en un fichero JSONL.
+          # Descargamos el archivo desde la API de Files.
+          file_url = f"{base_url}/{responses_file}?alt=media&key={api_key}"
+          file_resp = requests.get(file_url, timeout=BATCH_TOTAL_TIMEOUT)
+          if not file_resp.ok:
+            raise RuntimeError(
+              f"Error al descargar responsesFile (status={file_resp.status_code}): "
+              f"{file_resp.text[:500]}"
+            )
+
+          lines = [ln for ln in file_resp.text.splitlines() if ln.strip()]
+          if len(lines) != len(prompts):
+            raise RuntimeError(
+              f"Número de líneas en responsesFile ({len(lines)}) != número de prompts ({len(prompts)})."
+            )
+
+          for line in lines:
+            resp_obj = json.loads(line)
+            candidates = (resp_obj.get("candidates") or [])
+            if not candidates:
+              images.append(None)
+              continue
+
+            content = candidates[0].get("content") or {}
+            parts = content.get("parts") or []
+
+            found_bytes: bytes | None = None
+            for part in parts:
+              inline = part.get("inlineData") or part.get("inline_data")
+              if inline and "data" in inline:
+                b64 = inline["data"]
+                found_bytes = base64.b64decode(b64)
+                break
+
+            images.append(found_bytes)
+
+          return images
+
+        # Fallback: respuestas inline (menos habitual, pero soportado por la API).
+        inlined_wrapper = output.get("inlinedResponses") or {}
+        inlined_responses = inlined_wrapper.get("inlinedResponses") or []
+
+        if len(inlined_responses) != len(prompts):
+          raise RuntimeError(
+            f"Número de respuestas de batch ({len(inlined_responses)}) != número de prompts ({len(prompts)})."
+          )
+
+        for item in inlined_responses:
+          resp = item.get("response") or {}
+          candidates = resp.get("candidates") or []
+          if not candidates:
+            images.append(None)
+            continue
+
+          content = candidates[0].get("content") or {}
+          parts = content.get("parts") or []
+
+          found_bytes = None
+          for part in parts:
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline and "data" in inline:
+              b64 = inline["data"]
+              found_bytes = base64.b64decode(b64)
+              break
+
+          images.append(found_bytes)
+
+        return images
+
+    except (requests.RequestException, RuntimeError, ValueError) as exc:
+      last_error = exc
+      if attempt < max_retries:
+        wait_time = 2**attempt
+        print(
+          f"  [WARN] Error en batchGenerateContent (intento {attempt}/{max_retries}): {exc}. "
+          f"Reintentando en {wait_time}s...",
+          file=sys.stderr,
+        )
+        time.sleep(wait_time)
+      else:
+        break
+
+  raise RuntimeError(f"Falló la generación batch tras {max_retries} intentos: {last_error}")
+
+
+def build_final_prompt(
+  chapter_slug: str,
+  base_name: str,
+  prompt: str,
+  img_filename: str,
+) -> str:
+  """
+  Devuelve el texto final que se envía al modelo de imágenes,
+  aplicando estilo global y personaje recurrente si corresponde.
+  """
+  final_prompt = prompt
+
+  if GLOBAL_IMAGE_STYLE:
+    final_prompt = f"{GLOBAL_IMAGE_STYLE}\n\n{final_prompt}"
+
+  if (
+    CHARACTER_DESCRIPTION
+    and chapter_slug in CHARACTER_CHAPTERS
+    and any(
+      keyword.lower() in prompt.lower()
+      for keyword in CHARACTER_PROMPT_KEYWORDS
+    )
+  ):
+    final_prompt = f"{final_prompt}\n\n{CHARACTER_DESCRIPTION}"
+    print(f"    [INFO] Añadiendo personaje al prompt de {img_filename}")
+
+  return final_prompt
+
+
+def _process_prompt_to_image(
+  chapter_slug: str,
+  base_name: str,
+  idx: int,
+  prompt: str,
+  img_path: str,
+  img_filename: str,
+  api_key: str,
+) -> None:
+  final_prompt = build_final_prompt(
+    chapter_slug=chapter_slug,
+    base_name=base_name,
+    prompt=prompt,
+    img_filename=img_filename,
+  )
+
+  image_bytes = generate_image_for_prompt(
+    final_prompt,
+    model_name=IMAGE_MODEL_NAME,
+    api_key=api_key,
+  )
+
+  with open(img_path, "wb") as img_file:
+    img_file.write(image_bytes)
+
+
+def generate_images_batch_for_jobs(
+  chapter_slug: str,
+  base_name: str,
+  jobs: List[Tuple[int, str, str, str]],
+  api_key: str,
+) -> None:
+  """
+  Procesa una lista de jobs usando la Batch API.
+
+  Cada job es (idx, prompt, img_path, img_filename).
+  Se generan prompts finales (con estilo global y personaje) y se envían en batches
+  de tamaño BATCH_SIZE. Cada batch se procesa con batchGenerateContent.
+
+  Si un batch completo falla o alguna respuesta viene sin imagen, se lanza un error
+  y se detiene la ejecución (no se hace fallback a modo individual).
+  """
+  total_jobs = len(jobs)
+  print(f"  [INFO] Generando {total_jobs} imágenes en modo batch (BATCH_SIZE={BATCH_SIZE})...")
+
+  if total_jobs == 0:
+    return
+
+  for start_idx in range(0, total_jobs, BATCH_SIZE):
+    batch_jobs = jobs[start_idx : start_idx + BATCH_SIZE]
+    batch_prompts: List[str] = []
+    for _, prompt, _, img_filename in batch_jobs:
+      final_prompt = build_final_prompt(
+        chapter_slug=chapter_slug,
+        base_name=base_name,
+        prompt=prompt,
+        img_filename=img_filename,
+      )
+      batch_prompts.append(final_prompt)
+
+    batch_number = start_idx // BATCH_SIZE + 1
+    total_batches = (total_jobs + BATCH_SIZE - 1) // BATCH_SIZE
+    print(
+      f"  [INFO] Procesando batch {batch_number}/{total_batches} "
+      f"con {len(batch_jobs)} prompts..."
+    )
+
+    try:
+      images_bytes_list = batch_generate_images_for_prompts(
+        batch_prompts,
+        model_name=IMAGE_MODEL_NAME,
+        api_key=api_key,
+      )
+    except RuntimeError as exc:
+      print(
+        f"  [WARN] Falló batch {batch_number}/{total_batches}: {exc}.",
+        file=sys.stderr,
+      )
+      # En modo batch puro, propagamos el error para que falle el script.
+      raise
+
+    for (idx, prompt, img_path, img_filename), image_bytes in zip(
+      batch_jobs, images_bytes_list
+    ):
+      if image_bytes is None:
+        print(
+          f"  [WARN] Respuesta inválida o sin imagen para {img_filename} en batch.",
+          file=sys.stderr,
+        )
+        # Si alguna imagen falla en batch, detenemos la ejecución.
+        raise RuntimeError(
+          f"Respuesta inválida o sin imagen para {img_filename} en batch."
+        )
+
+      with open(img_path, "wb") as img_file:
+        img_file.write(image_bytes)
+
+
 def main() -> None:
   book_name, book_dir = resolve_book_dir()
   print(f"Libro: {book_name}")
@@ -216,6 +567,8 @@ def main() -> None:
       print("  No hay prompts en el archivo, se omite.")
       continue
 
+    jobs: list[tuple[int, str, str, str]] = []
+
     for idx, prompt in enumerate(prompts, start=1):
       img_filename = f"{base_name}_img{idx:02d}.{IMAGES_FORMAT}"
       img_path = os.path.join(chapter_img_dir, img_filename)
@@ -225,36 +578,39 @@ def main() -> None:
         continue
 
       print(f"  - Generando imagen {idx}/{len(prompts)} para {base_name}...")
+      jobs.append((idx, prompt, img_path, img_filename))
 
-      # Construimos el prompt final aplicando estilo global y, si corresponde, personaje.
-      final_prompt = prompt
+    if not jobs:
+      continue
 
-      if GLOBAL_IMAGE_STYLE:
-        final_prompt = f"{GLOBAL_IMAGE_STYLE}\n\n{final_prompt}"
-
-      # Solo añadimos la descripción del personaje si:
-      # - Hay descripción configurada
-      # - El capítulo está marcado en CHARACTER_CHAPTERS
-      # - El prompt menciona explícitamente al personaje (según las palabras clave)
-      if (
-        CHARACTER_DESCRIPTION
-        and chapter_slug in CHARACTER_CHAPTERS
-        and any(
-          keyword.lower() in prompt.lower()
-          for keyword in CHARACTER_PROMPT_KEYWORDS
-        )
-      ):
-        final_prompt = f"{final_prompt}\n\n{CHARACTER_DESCRIPTION}"
-        print(f"    [INFO] Añadiendo personaje al prompt de {img_filename}")
-
-      image_bytes = generate_image_for_prompt(
-        final_prompt,
-        model_name=IMAGE_MODEL_NAME,
+    if USE_BATCH_API:
+      print("  [INFO] Usando Batch API para este archivo de prompts.")
+      generate_images_batch_for_jobs(
+        chapter_slug=chapter_slug,
+        base_name=base_name,
+        jobs=jobs,
         api_key=api_key,
       )
+    else:
+      max_workers = max(1, int(MAX_CONCURRENT_PER_PART))
 
-      with open(img_path, "wb") as img_file:
-        img_file.write(image_bytes)
+      with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+          executor.submit(
+            _process_prompt_to_image,
+            chapter_slug,
+            base_name,
+            idx,
+            prompt,
+            img_path,
+            img_filename,
+            api_key,
+          )
+          for idx, prompt, img_path, img_filename in jobs
+        ]
+
+        for future in futures:
+          future.result()
 
   print("✅ Imágenes generadas a partir de los prompts. "
         "Estructura: img/<chapter_slug>/partNNN_img01.png, partNNN_img02.png, ...")

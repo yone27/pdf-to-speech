@@ -81,3 +81,25 @@ py text_to_audiobook.py BOOK [--workers N] [--prompt "texto"] [--base-dir RUTA]
 
 DOC: 
 https://docs.cloud.google.com/text-to-speech/docs/gemini-tts?hl=es-419#curl
+
+
+
+// habria que hacer un filtro para quitar los 
+[VISUAL:
+en los guiones
+
+
+¿Por qué ROMA tuvo el MEJOR EJÉRCITO?
+¿Por qué los EJÉRCITOS MEDIEVALES eran TAN PEQUEÑOS?
+
+La Guardia Varega: Los Vikingos del Imperio Bizantino
+La guardia pretoriana
+catafractos
+The Epic Story of Perseus Explained
+Egyptian Gods Explained In 20 Minutes 
+Genghis Khan Explained In 20 Minutes
+
+https://www.youtube.com/watch?v=6I6w9TvWNNo&t=68s roma
+https://www.youtube.com/watch?v=2jlExD3OG18 templarios
+https://www.youtube.com/watch?v=cWl1gu8_XVI iliada
+https://www.youtube.com/watch?v=AM-g4QPNINg trojan war

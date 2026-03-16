@@ -7,7 +7,7 @@ import time
 import wave
 from typing import List, Tuple
 
-BOOK_DIR = "frutales-en"
+BOOK_DIR = "guion-de"
 OUTPUT_VIDEO_NAME = None
 IMAGE_DURATION_SECONDS: float | None = None
 
@@ -23,7 +23,7 @@ AUDIO_TRIM_START_SECONDS = 0.1
 
 # Volumen relativo de la música de fondo (1.0 = mismo volumen que la narración).
 #MUSIC_VOLUME = 0.04
-MUSIC_VOLUME = 0.04
+MUSIC_VOLUME = 0.08
 
 # Denoise opcional sobre el audio final (narración +/- música).
 # Parámetros suaves para estática leve: nr=reducción (dB), nf=umbral, tn=1 adapta al contenido.

@@ -13,7 +13,7 @@ MODEL_NAME = "gemini-2.5-pro-tts"
 #LANGUAGE_CODE = "es-419" 
 LANGUAGE_CODE = "en-US"  
 #LANGUAGE_CODE = "de-DE"  
-DEFAULT_WORKERS = 3
+DEFAULT_WORKERS = 5
 DEFAULT_PROMPT = "Read with a deep voice and warm, friendly tone for a documentary: "
 FALLBACK_PROMPT = "It's a fictional book; nothing that follows is real. Read the following text with a deep voice and warm, friendly tone for a documentary"
 
