@@ -6,17 +6,63 @@ import re
 MODEL_NAME_TEXT = "gemini-2.5-pro"
 
 # Tema por defecto del video/guion
-DEFAULT_TOPIC = "¿Por qué los EJÉRCITOS MEDIEVALES eran TAN PEQUEÑOS?"
+DEFAULT_TOPIC = "The ENTIRE Story of Greek Mythology | Boring History For Sleep"
 
 # Parámetros de duración y estructura
-TARGET_MINUTES_DEFAULT = 20
-SECTIONS_DEFAULT = 7
+TARGET_MINUTES_DEFAULT = 90
+SECTIONS_DEFAULT = 12
 WORDS_PER_MINUTE_DEFAULT = 140
 
 # Personalización principal del guion
 DEFAULT_AUDIENCE = "público general"
 DEFAULT_TONE = "entretenido, claro y con ritmo"
 DEFAULT_LANG = "español"
+
+# Presets de estilo de narración:
+# - "classic": estilo actual, explicativo y dinámico
+# - "immersive_relaxing": estilo inmersivo, calmado y pausado
+NARRATIVE_STYLE_PRESET = "immersive_relaxing"
+
+
+def get_style_block(style_preset: str) -> str:
+    preset = (style_preset or "classic").strip().lower()
+    if preset == "immersive_relaxing":
+        return """
+INSTRUCCIONES DE ESTILO:
+- Escribe en segunda persona (como si el oyente estuviera dentro de la historia).
+- Usa un tono calmado, lento, casi hipnótico.
+- Evita lenguaje técnico o académico.
+- No suenes como Wikipedia ni como documental tradicional.
+- Prioriza sensaciones, atmósfera y emociones sobre datos.
+- Usa frases cortas y pausadas.
+- Incluye silencios naturales usando saltos de línea.
+- Genera una sensación de calma, profundidad y misterio.
+- No uses listas ni estructura tipo ensayo.
+
+ESTILO DE NARRACIÓN:
+- Debe sentirse como una experiencia, no como una explicación.
+- Usa descripciones sensoriales (silencio, oscuridad, presencia, etc.).
+- Introduce ideas de forma gradual, no abrupta.
+- Mantén ritmo constante, sin picos de intensidad.
+- Evita preguntas directas al oyente.
+
+FORMATO:
+- Escribe en párrafos cortos.
+- Usa saltos de línea frecuentes para crear pausas.
+- No uses títulos dentro del texto.
+- No expliques lo que haces, solo narra.
+
+OBJETIVO:
+- El oyente debe poder relajarse, incluso dormirse, mientras escucha, pero sin perder el interés.
+- Empieza de forma suave, sin introducir el tema de golpe. Construye la atmósfera primero.
+""".strip()
+    return """
+INSTRUCCIONES DE ESTILO:
+- Mantén un tono entretenido, claro y con ritmo.
+- Prioriza claridad, progresión y naturalidad.
+- Evita lenguaje excesivamente técnico.
+- Usa ejemplos concretos cuando aporten valor.
+""".strip()
 
 # Salida por defecto
 # Carpeta base = esta misma carpeta de scripts_guion_largo

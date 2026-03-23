@@ -7,7 +7,7 @@ import time
 import wave
 from typing import List, Tuple
 
-BOOK_DIR = "guion-de"
+BOOK_DIR = "guion"
 OUTPUT_VIDEO_NAME = None
 IMAGE_DURATION_SECONDS: float | None = None
 
@@ -36,8 +36,8 @@ AUDIO_DENOISE_FILTER = "afftdn=nr=8:nf=-50:tn=1"
 IMAGE_EFFECT = "pulse"
 
 # Parámetros del efecto "pulse" (zoom in-out suave).
-PULSE_STRENGTH = 0.03  # amplitud del zoom (0.03 = +/-3 %)
-PULSE_PERIOD = 10.0     # segundos por ciclo completo de in-out
+PULSE_STRENGTH = 0.05  # amplitud del zoom (0.03 = +/-3 %)
+PULSE_PERIOD = 20.0     # segundos por ciclo completo de in-out
 
 # Tipo de transición para el primer cambio de imagen (xfade transition=...).
 FIRST_TRANSITION = "slideleft"
@@ -224,6 +224,14 @@ def write_edl(
 
 def _normalize_path_for_ffmpeg(path: str) -> str:
     return os.path.abspath(path).replace("\\", "/")
+
+
+def _normalize_chapter_key(chapter_key: str) -> str:
+    """Normalize chapter folder keys to match names like 'cap 1' and 'cap1'."""
+    normalized = chapter_key.strip().lower().replace("\\", "/")
+    normalized = normalized.replace("/", "")
+    normalized = re.sub(r"[\s_-]+", "", normalized)
+    return normalized
 
 
 def _export_simple_slideshow_with_ffmpeg(
@@ -600,17 +608,34 @@ def main() -> None:
 
     # Descubrir carpeta de música opcional.
     music_dir = os.path.join(book_dir, "music")
-    music_paths: List[str] = []
+    root_music_paths: List[str] = []
+    chapter_music_paths_by_key: dict[str, List[str]] = {}
     if os.path.isdir(music_dir):
         for fname in sorted(os.listdir(music_dir)):
-            if fname.lower().endswith(".wav"):
-                music_paths.append(os.path.join(music_dir, fname))
+            fpath = os.path.join(music_dir, fname)
+            if os.path.isfile(fpath) and fname.lower().endswith(".wav"):
+                root_music_paths.append(fpath)
+                continue
+            if not os.path.isdir(fpath):
+                continue
+            chapter_wavs: List[str] = []
+            for nested_fname in sorted(os.listdir(fpath)):
+                nested_fpath = os.path.join(fpath, nested_fname)
+                if os.path.isfile(nested_fpath) and nested_fname.lower().endswith(".wav"):
+                    chapter_wavs.append(nested_fpath)
+            if chapter_wavs:
+                chapter_music_paths_by_key[_normalize_chapter_key(fname)] = chapter_wavs
 
     print(f"Libro: {book_name}")
     print(f"Audio: {audio_dir}")
     print(f"Imágenes: {img_dir}")
-    if music_paths:
-        print(f"Música de fondo: {music_dir} ({len(music_paths)} archivo(s) WAV)")
+    if chapter_music_paths_by_key:
+        print(
+            "Música de fondo por capítulo: "
+            f"{music_dir} ({len(chapter_music_paths_by_key)} carpeta(s) con WAV)"
+        )
+    elif root_music_paths:
+        print(f"Música de fondo global: {music_dir} ({len(root_music_paths)} archivo(s) WAV)")
     else:
         print("Música de fondo: (ninguna pista WAV encontrada en 'music/')")
     print(f"Salida video: {video_dir}")
@@ -713,6 +738,12 @@ def main() -> None:
 
     print("Usando slideshow simple con FFmpeg (sin MoviePy), exportando por capítulos:")
     for chapter_key, chapter_parts in chapters.items():
+        normalized_chapter_key = _normalize_chapter_key(chapter_key)
+        chapter_music_paths = chapter_music_paths_by_key.get(
+            normalized_chapter_key,
+            root_music_paths,
+        )
+
         # Sufijo seguro para el nombre del archivo de salida.
         # Ej: '' -> 'full', 'cap 1' -> 'cap-1', 'cap 1/sub' -> 'cap-1_sub'
         safe_suffix = chapter_key or "full"
@@ -732,6 +763,10 @@ def main() -> None:
             f"  - Capítulo '{chapter_key or 'root'}' -> {chapter_out_name} "
             f"({len(chapter_parts)} parte(s))"
         )
+        if chapter_music_paths:
+            print(f"    Música: {len(chapter_music_paths)} archivo(s) WAV")
+        else:
+            print("    Música: sin WAV para este capítulo")
 
         _export_simple_slideshow_with_ffmpeg(
             book_name=chapter_book_name,
@@ -739,7 +774,7 @@ def main() -> None:
             parts=chapter_parts,
             duration_per_image=duration_per_image,
             audio_trim_start_seconds=max(AUDIO_TRIM_START_SECONDS, 0.0),
-            music_paths=music_paths,
+            music_paths=chapter_music_paths,
             music_volume=args.music_volume,
             ffmpeg_exe=_ffmpeg_exe,
             use_gpu=use_gpu_simple,

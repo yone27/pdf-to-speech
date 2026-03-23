@@ -1,7 +1,13 @@
 import json
 from typing import List, Optional
 
-from scripts_guion_largo.config import DEFAULT_LANG, DEFAULT_TONE, MODEL_NAME_TEXT
+from scripts_guion_largo.config import (
+    DEFAULT_LANG,
+    DEFAULT_TONE,
+    MODEL_NAME_TEXT,
+    NARRATIVE_STYLE_PRESET,
+    get_style_block,
+)
 from scripts_guion_largo.gemini_client import call_gemini, contar_palabras
 from scripts_guion_largo.outline import IndiceGuion, ParteIndice
 
@@ -14,6 +20,7 @@ def generate_section(
     min_words: int,
     max_words: int,
     tone: str = DEFAULT_TONE,
+    style_preset: str = NARRATIVE_STYLE_PRESET,
     resumen_previas: Optional[str],
     api_key: str,
 ) -> str:
@@ -40,6 +47,7 @@ def generate_section(
         else ""
     )
 
+    style_block = get_style_block(style_preset)
     prompt = f"""
 Actúa como guionista para videos de YouTube en {DEFAULT_LANG}.
 
@@ -64,6 +72,9 @@ Contexto de estructura completa (JSON):
 - Incluye explicación, contexto, al menos un ejemplo concreto y una implicación práctica.
 - Termina con una transición suave hacia la siguiente sección (si existe), sin cerrarla del todo.
 
+Parámetros de estilo del guion:
+{style_block}
+
 Devuelve solo el texto de la sección, sin encabezados ni notas, escrita completamente en {DEFAULT_LANG}.
 """
 
@@ -83,12 +94,14 @@ def maybe_expand_section_if_short(
     outline: IndiceGuion,
     section: ParteIndice,
     tone: str = DEFAULT_TONE,
+    style_preset: str = NARRATIVE_STYLE_PRESET,
     api_key: str,
 ) -> str:
     """Si la sección queda por debajo de min_words, la reescribe y expande."""
     if contar_palabras(text) >= min_words:
         return text
 
+    style_block = get_style_block(style_preset)
     prompt = f"""
 Tengo la siguiente sección de un guion de YouTube en {DEFAULT_LANG}, pero ha quedado demasiado corta.
 
@@ -105,6 +118,9 @@ Instrucciones:
 - No repitas frases literalmente.
 - No cambies el sentido de lo ya escrito.
 - No hagas introducción general ni conclusión global del video.
+
+Parámetros de estilo del guion:
+{style_block}
 
 Devuelve la sección reescrita y expandida, como un único texto coherente en {DEFAULT_LANG}.
 """

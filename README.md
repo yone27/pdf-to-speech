@@ -80,17 +80,15 @@ py text_to_audiobook.py BOOK [--workers N] [--prompt "texto"] [--base-dir RUTA]
 - `--base-dir`: base donde buscar la carpeta del libro si pasas solo el nombre.
 
 DOC: 
-https://docs.cloud.google.com/text-to-speech/docs/gemini-tts?hl=es-419#curl
+
+// coste por uso
+https://console.cloud.google.com/billing/019D42-F50717-3553DA/reports;timeRange=CUSTOM_RANGE;from=2026-01-01;to=2026-03-31;timeGrouping=GROUP_BY_DAY?hl=es-419&project=brave-healer-451403-e6
 
 
 
 // habria que hacer un filtro para quitar los 
 [VISUAL:
 en los guiones
-
-
-¿Por qué ROMA tuvo el MEJOR EJÉRCITO?
-¿Por qué los EJÉRCITOS MEDIEVALES eran TAN PEQUEÑOS?
 
 La Guardia Varega: Los Vikingos del Imperio Bizantino
 La guardia pretoriana

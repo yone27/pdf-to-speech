@@ -9,6 +9,7 @@ if _src_dir not in sys.path:
 import json
 
 from scripts_guion_largo.config import (
+    NARRATIVE_STYLE_PRESET,
     DEFAULT_TOPIC,
     DEFAULT_TONE,
     SECTIONS_DEFAULT,
@@ -59,6 +60,7 @@ def main() -> None:
     sections_count: int = SECTIONS_DEFAULT
     words_per_minute: int = WORDS_PER_MINUTE_DEFAULT
     tone: str = DEFAULT_TONE
+    style_preset: str = NARRATIVE_STYLE_PRESET
     overwrite: bool = False
 
     if target_minutes <= 0:
@@ -85,6 +87,7 @@ def main() -> None:
     print(f"Carpeta de trabajo: {run_dir}")
     print(f"Carpeta de secciones: {sections_dir}")
     print(f"Duración objetivo: ~{target_minutes} minutos")
+    print(f"Estilo narrativo: {style_preset}")
     print(
         f"Palabras por sección: objetivo ~{words_per_section} "
         f"(mín {min_words_section}, máx {max_words_section})"
@@ -119,6 +122,7 @@ def main() -> None:
                         min_words=min_words_section,
                         max_words=max_words_section,
                         tone=tone,
+                        style_preset=style_preset,
                         resumen_previas=resumen_previas or None,
                         api_key=api_key,
                     )
@@ -129,6 +133,7 @@ def main() -> None:
                         outline=outline,
                         section=parte,
                         tone=tone,
+                        style_preset=style_preset,
                         api_key=api_key,
                     )
                     palabras_sec = contar_palabras(texto)

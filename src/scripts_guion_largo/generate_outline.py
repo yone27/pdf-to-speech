@@ -10,6 +10,7 @@ import json
 
 from scripts_guion_largo.config import (
     DEFAULT_TOPIC,
+    NARRATIVE_STYLE_PRESET,
     OUTPUT_BASE_DIR_DEFAULT,
     TARGET_MINUTES_DEFAULT,
     SECTIONS_DEFAULT,
@@ -25,17 +26,20 @@ def main() -> None:
     topic: str = DEFAULT_TOPIC
     target_minutes: int = TARGET_MINUTES_DEFAULT
     sections_count: int = SECTIONS_DEFAULT
+    style_preset: str = NARRATIVE_STYLE_PRESET
 
     api_key = load_api_key()
 
     print(f"Tema: {topic}")
     print(f"Duración objetivo: ~{target_minutes} minutos")
     print(f"Secciones: {sections_count}")
+    print(f"Estilo narrativo: {style_preset}")
 
     outline = generate_outline(
         topic=topic,
         target_minutes=target_minutes,
         sections_count=sections_count,
+        style_preset=style_preset,
         api_key=api_key,
     )
 
@@ -48,6 +52,7 @@ def main() -> None:
             "topic": topic,
             "target_minutes": target_minutes,
             "sections_count": sections_count,
+            "style_preset": style_preset,
         },
         "titulo_general": outline.titulo_general,
         "partes": [

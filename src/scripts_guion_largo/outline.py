@@ -2,7 +2,14 @@ import json
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from scripts_guion_largo.config import DEFAULT_AUDIENCE, DEFAULT_LANG, DEFAULT_TONE, MODEL_NAME_TEXT
+from scripts_guion_largo.config import (
+    DEFAULT_AUDIENCE,
+    DEFAULT_LANG,
+    DEFAULT_TONE,
+    MODEL_NAME_TEXT,
+    NARRATIVE_STYLE_PRESET,
+    get_style_block,
+)
 from scripts_guion_largo.gemini_client import call_gemini
 
 
@@ -64,9 +71,11 @@ def generate_outline(
     *,
     audience: str = DEFAULT_AUDIENCE,
     tone: str = DEFAULT_TONE,
+    style_preset: str = NARRATIVE_STYLE_PRESET,
     api_key: str,
 ) -> IndiceGuion:
     """Genera un índice estructurado del guion usando Gemini."""
+    style_block = get_style_block(style_preset)
     prompt = f"""
 Actúa como guionista para videos de YouTube en {DEFAULT_LANG}.
 
@@ -83,6 +92,9 @@ Instrucciones:
 - Evita títulos genéricos.
 - Ordena las partes para que haya progresión y curiosidad.
 - Para cada parte, añade una breve descripción de 2-3 líneas explicando qué debe desarrollarse.
+
+Parámetros de estilo del guion:
+{style_block}
 
 Devuelve el resultado en formato JSON válido, en {DEFAULT_LANG} y sin texto adicional:
 {{

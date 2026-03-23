@@ -11,3 +11,4 @@
 *.pyc
 /scripts_guion_largo/scripts_output/*
 *.md
+*.mov

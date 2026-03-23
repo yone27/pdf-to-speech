@@ -6,7 +6,7 @@ import time
 from typing import List, Tuple
 
 
-BOOK_DIR_DEFAULT = "guion-en"
+BOOK_DIR_DEFAULT = "guion"
 GAP_SECONDS_DEFAULT = 1.0
 TIME_FORMAT_DEFAULT = "mmss" 
 
@@ -289,7 +289,7 @@ def main() -> None:
         print("ADVERTENCIA: No se detectaron líneas de capítulo en guion.txt (líneas que empiecen por '# ').")
 
     # 4) Construir índice y escribir en meta.
-    meta_path = os.path.join(book_dir, "meta")
+    meta_path = os.path.join(book_dir, "meta.md")
     output_name = args.output or f"{book_name}-full.mp4"
     _write_meta_index(
         meta_path=meta_path,
