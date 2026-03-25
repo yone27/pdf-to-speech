@@ -46,6 +46,17 @@ OTHER_TRANSITION = "slideright"
 # Duración de cada transición en segundos.
 TRANSITION_DURATION = 0.8
 
+# Overlay opcional (video de partículas/luz encima del slideshow).
+# colorkey quita el fondo oscuro; la opacidad (aa) afecta a TODA la capa: valores bajos
+# dejan las partículas muy tenues. eq refuerza brillo/contraste solo del overlay.
+OVERLAY_OPACITY = 1
+OVERLAY_KEY_COLOR = "0x000000"
+# Similarity más baja = solo se elimina color muy cercano al key (conserva bordes de partículas).
+OVERLAY_KEY_SIMILARITY = 0.16
+OVERLAY_KEY_BLEND = 0.06
+OVERLAY_BRIGHTNESS = 0.12
+OVERLAY_CONTRAST = 1.18
+
 # Si es False, los WAV intermedios generados solo para el render con FFmpeg
 # (por capítulo: *_audio.wav, *_music.wav) se eliminarán automáticamente
 # tras generar el MP4. Los WAV usados para --export-resolve siempre se conservan.
@@ -234,6 +245,21 @@ def _normalize_chapter_key(chapter_key: str) -> str:
     return normalized
 
 
+def _find_overlay_video_path(book_dir: str) -> str | None:
+    overlay_dir = os.path.join(book_dir, "overlay")
+    if not os.path.isdir(overlay_dir):
+        return None
+    allowed_exts = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
+    try:
+        for fname in sorted(os.listdir(overlay_dir)):
+            fpath = os.path.join(overlay_dir, fname)
+            if os.path.isfile(fpath) and fname.lower().endswith(allowed_exts):
+                return fpath
+    except OSError:
+        return None
+    return None
+
+
 def _export_simple_slideshow_with_ffmpeg(
     book_name: str,
     video_dir: str,
@@ -246,6 +272,7 @@ def _export_simple_slideshow_with_ffmpeg(
     use_gpu: bool,
     gpu_index: int,
     preset: str,
+    overlay_video_path: str | None = None,
 ) -> None:
     image_entries: List[Tuple[str, float]] = []
     audio_paths_ordered: List[str] = []
@@ -315,6 +342,12 @@ def _export_simple_slideshow_with_ffmpeg(
         music_index = len(image_entries) + 1
         cmd += ["-i", music_wav_path]
 
+    # Añadir overlay de video (si existe) como entrada adicional en loop.
+    overlay_index: int | None = None
+    if overlay_video_path:
+        overlay_index = len(image_entries) + 1 + (1 if music_index is not None else 0)
+        cmd += ["-stream_loop", "-1", "-i", _normalize_path_for_ffmpeg(overlay_video_path)]
+
     # Construir filter_complex con scale+crop, efecto opcional y cadena de xfade.
     filter_parts: List[str] = []
     scaled_labels: List[str] = []
@@ -369,6 +402,26 @@ def _export_simple_slideshow_with_ffmpeg(
             current_time = current_time + durations[idx] - effective_transition
             current_label = out_label
         final_video_label = current_label
+
+    # Overlay visual opcional (ej. partículas): eliminar fondo oscuro y superponer.
+    if overlay_index is not None:
+        overlay_scaled_label = "[ovr]"
+        video_with_overlay_label = "[vout]"
+        filter_parts.append(
+            f"[{overlay_index}:v]"
+            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={WIDTH}:{HEIGHT},format=rgba,"
+            f"colorkey={OVERLAY_KEY_COLOR}:{OVERLAY_KEY_SIMILARITY:.2f}:{OVERLAY_KEY_BLEND:.2f},"
+            f"eq=brightness={OVERLAY_BRIGHTNESS:.3f}:contrast={OVERLAY_CONTRAST:.3f},"
+            f"colorchannelmixer=aa={OVERLAY_OPACITY:.3f}"
+            f"{overlay_scaled_label}"
+        )
+        filter_parts.append(
+            f"{final_video_label}{overlay_scaled_label}"
+            f"overlay=shortest=1"
+            f"{video_with_overlay_label}"
+        )
+        final_video_label = video_with_overlay_label
 
     audio_map_label: str
     if music_index is not None:
@@ -492,6 +545,17 @@ def collect_parts_audio_and_images(
     audio_dir: str, img_dir: str
 ) -> List[Tuple[str, List[str]]]:
     tasks: List[Tuple[str, str, List[str]]] = []  # (rel_key, audio_path, image_paths)
+    allowed_fallback_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+    fallback_global_image = ""
+    try:
+        for name in sorted(os.listdir(img_dir)):
+            path = os.path.join(img_dir, name)
+            if os.path.isfile(path) and name.lower().endswith(allowed_fallback_exts):
+                fallback_global_image = path
+                break
+    except OSError:
+        fallback_global_image = ""
+    has_fallback_global_image = bool(fallback_global_image)
 
     for root, _dirs, files in os.walk(audio_dir):
         for fname in sorted(files):
@@ -506,7 +570,8 @@ def collect_parts_audio_and_images(
 
             img_chapter_dir = os.path.join(img_dir, rel_base) if rel_base else img_dir
             if not os.path.isdir(img_chapter_dir):
-                tasks.append((rel, audio_path, []))
+                image_paths = [fallback_global_image] if has_fallback_global_image else []
+                tasks.append((rel, audio_path, image_paths))
                 continue
 
             pattern = re.compile(r"^" + re.escape(base_name) + r"_img(\d+)\.png$", re.IGNORECASE)
@@ -518,6 +583,8 @@ def collect_parts_audio_and_images(
                     pairs.append((num, os.path.join(img_chapter_dir, img_name)))
             pairs.sort(key=lambda x: x[0])
             image_paths = [p[1] for p in pairs]
+            if not image_paths and has_fallback_global_image:
+                image_paths = [fallback_global_image]
             tasks.append((rel, audio_path, image_paths))
 
     tasks.sort(key=lambda t: t[0])
@@ -638,6 +705,11 @@ def main() -> None:
         print(f"Música de fondo global: {music_dir} ({len(root_music_paths)} archivo(s) WAV)")
     else:
         print("Música de fondo: (ninguna pista WAV encontrada en 'music/')")
+    overlay_video_path = _find_overlay_video_path(book_dir)
+    if overlay_video_path:
+        print(f"Overlay: {overlay_video_path}")
+    else:
+        print("Overlay: (sin video en 'overlay/')")
     print(f"Salida video: {video_dir}")
 
     parts = collect_parts_audio_and_images(audio_dir, img_dir)
@@ -780,6 +852,7 @@ def main() -> None:
             use_gpu=use_gpu_simple,
             gpu_index=gpu_index_simple,
             preset=args.preset,
+            overlay_video_path=overlay_video_path,
         )
 
     return
