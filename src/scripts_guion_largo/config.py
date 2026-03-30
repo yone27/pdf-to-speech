@@ -3,15 +3,15 @@ import re
 
 
 # Modelo de texto a usar
-MODEL_NAME_TEXT = "gemini-2.5-pro"
+MODEL_NAME_TEXT = "gemini-2.5-flash"
 
 # Tema por defecto del video/guion
-DEFAULT_TOPIC = "The ENTIRE Story of Greek Mythology | Boring History For Sleep"
+DEFAULT_TOPIC = "¿Por qué Roma atacó Grecia?"
 
 # Parámetros de duración y estructura
-TARGET_MINUTES_DEFAULT = 90
-SECTIONS_DEFAULT = 12
-WORDS_PER_MINUTE_DEFAULT = 140
+TARGET_MINUTES_DEFAULT = 25
+SECTIONS_DEFAULT = 7
+WORDS_PER_MINUTE_DEFAULT = 120
 
 # Personalización principal del guion
 DEFAULT_AUDIENCE = "público general"

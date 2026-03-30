@@ -13,8 +13,8 @@ load_dotenv()
 
 BOOK_DIR = "guion"
 NUM_IMAGES_PER_PART = 10
-MODEL_NAME_TEXT = "gemini-2.5-pro"
-NUM_WORKERS = 5  # 1 = secuencial; >1 = procesamiento en paralelo
+MODEL_NAME_TEXT = "gemini-2.5-flash"
+NUM_WORKERS = 5 
 
 PROMPT_TEMPLATE = (
   "Genera una lista de prompts breves para un modelo de generación de imágenes, "

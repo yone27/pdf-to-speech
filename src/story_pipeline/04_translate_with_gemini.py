@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SOURCE_BOOK_DIR = "guion"
-TARGET_LANG_CODE = "de"
-MODEL_NAME = "gemini-2.5-pro"
+TARGET_LANG_CODE = "en"
+MODEL_NAME = "gemini-2.5-flash"
 SKIP_EXISTING = True  # Si True, no vuelve a traducir archivos ya generados en la carpeta destino
 REQUEST_TIMEOUT = 60.0
 MAX_RETRIES = 3
